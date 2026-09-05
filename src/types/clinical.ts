@@ -3,7 +3,10 @@
 export type ProvenanceSource = 
   | 'USER_PROVIDED'
   | 'DOCUMENT_EXTRACTED'
+  | 'OCR_EXTRACTED'
+  | 'AI_EXTRACTED'
   | 'AI_GENERATED'
+  | 'HUMAN_VERIFIED'
   | 'USER_EDITED';
 
 export type VerificationStatus = 
@@ -25,7 +28,8 @@ export type ConflictType =
   | 'MEDICATION_INCONSISTENCY'
   | 'ALLERGY_DISCREPANCY'
   | 'LAB_VALUE_DIVERGENCE'
-  | 'DATE_ANOMALY';
+  | 'DATE_ANOMALY'
+  | 'DUPLICATE_DISCREPANCY';
 
 export type ConflictResolutionStatus = 
   | 'DETECTED'
