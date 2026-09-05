@@ -6,6 +6,20 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  return handleEdit(req, params);
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  return handleEdit(req, params);
+}
+
+async function handleEdit(
+  req: NextRequest,
+  params: Promise<{ id: string }>
+) {
   try {
     const auth = await verifyPatientAccess(req);
     if (!auth.authorized) {
@@ -13,18 +27,20 @@ export async function POST(
     }
 
     const { id } = await params;
-    const body = await req.json().catch(() => ({}));
+    const body = await req.json();
 
-    const result = await VerificationService.acceptTask(id, {
-      userId: body.verifiedBy || body.userId || auth.userId || 'Dr. Sarah Jenkins, MD',
-      notes: body.notes || 'Accepted as clinically verified',
+    const editedValues = body.editedValues || body;
+    const result = await VerificationService.editTask(id, {
+      editedValues,
+      userId: body.editedBy || body.userId || auth.userId || 'Dr. Sarah Jenkins, MD',
+      reason: body.reason || 'Clinician corrected value during verification review',
     });
 
     return NextResponse.json({
       success: true,
       data: result.record || result.task,
       task: result.task,
-      message: 'Entity verified successfully with HUMAN_VERIFIED provenance.',
+      message: 'Entity edited successfully with USER_EDITED provenance and audit log.',
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

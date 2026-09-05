@@ -126,35 +126,35 @@ async function testLiveServer() {
       }
 
       // 9. Verification Queue & Action Endpoints
-      await checkRoute('/api/verification', 'GET');
+      console.log('\n  --- Testing Human Verification Engine Endpoints ---');
+      const vTasksRes = await checkRoute('/api/verification', 'GET');
+      const vTasks = vTasksRes?.data || [];
+      console.log(`         Loaded ${vTasks.length} active verification tasks.`);
 
-      if (extractions?.data?.labResults?.length >= 2) {
-        const lab1Id = extractions.data.labResults[0].id;
-        const lab2Id = extractions.data.labResults[1].id;
+      if (vTasks.length > 0) {
+        const testTask = vTasks[0];
+        // 9a. GET Task by ID
+        await checkRoute(`/api/verification/${testTask.id}`, 'GET');
+        // 9b. POST Start Review
+        await checkRoute(`/api/verification/${testTask.id}/start`, 'POST');
+        // 9c. GET Task Verification History
+        await checkRoute(`/api/verification/${testTask.id}/history`, 'GET');
 
-        // Accept verification
-        await checkRoute(`/api/verification/${lab1Id}/accept`, 'POST', {
-          patientId: createdPatientId,
-          entityType: 'LAB_RESULT',
+        if (vTasks.length >= 2) {
+          const taskToEdit = vTasks[1];
+          // 9d. PATCH Edit Task
+          await checkRoute(`/api/verification/${taskToEdit.id}/edit`, 'PATCH', {
+            editedValues: { measuredValue: '11.8', unit: 'g/dL' },
+            editedBy: 'Dr. Sarah Jenkins, MD',
+            reason: 'Clinician manual adjustment',
+          });
+        }
+
+        // 9e. POST Accept Task
+        await checkRoute(`/api/verification/${testTask.id}/accept`, 'POST', {
           verifiedBy: 'Dr. Sarah Jenkins, MD',
           notes: 'Clinician accepted during live integration test',
         });
-
-        // Edit verification
-        await checkRoute(`/api/verification/${lab2Id}`, 'PATCH', {
-          patientId: createdPatientId,
-          entityType: 'LAB_RESULT',
-          editedValues: { measuredValue: '215', notes: 'Clinician corrected value' },
-          editedBy: 'Dr. Sarah Jenkins, MD',
-          reason: 'Manual adjustment of borderline lab value',
-        });
-
-        // Check that verification added immutable history events
-        const updatedHistory = await checkRoute(`/api/records/${lab2Id}/provenance/history`, 'GET');
-        const hLen = updatedHistory?.history?.length || updatedHistory?.data?.length || 0;
-        if (hLen > 1) {
-          console.log(`         Verified provenance history appended immutable version (History Length: ${hLen}).`);
-        }
       }
 
       // 10. Conflict Detection Engine Endpoints

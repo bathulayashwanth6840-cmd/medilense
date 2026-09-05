@@ -14,17 +14,17 @@ export async function POST(
 
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
+    const userId = body.userId || auth.userId || 'Dr. Sarah Jenkins, MD';
 
-    const result = await VerificationService.acceptTask(id, {
-      userId: body.verifiedBy || body.userId || auth.userId || 'Dr. Sarah Jenkins, MD',
-      notes: body.notes || 'Accepted as clinically verified',
-    });
+    const task = await VerificationService.startTask(id, userId);
+    if (!task) {
+      return NextResponse.json({ success: false, error: `Verification task '${id}' not found.` }, { status: 404 });
+    }
 
     return NextResponse.json({
       success: true,
-      data: result.record || result.task,
-      task: result.task,
-      message: 'Entity verified successfully with HUMAN_VERIFIED provenance.',
+      data: task,
+      message: 'Verification task marked as IN_REVIEW.',
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

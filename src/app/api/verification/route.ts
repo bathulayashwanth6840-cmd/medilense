@@ -1,40 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/dataStore';
+import { VerificationService } from '@/lib/services/verification/VerificationService';
 import { VerificationActionSchema } from '@/lib/validation/schemas';
+import { verifyPatientAccess } from '@/lib/security/auth';
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = await verifyPatientAccess(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error || 'Unauthorized' }, { status: 403 });
+    }
+
     const { searchParams } = new URL(req.url);
-    const patientId = searchParams.get('patientId');
-    const store = getStore();
+    const patientId = searchParams.get('patientId') || undefined;
+    const status = searchParams.get('status') || undefined;
+    const reason = searchParams.get('reason') || undefined;
+    const recordType = searchParams.get('recordType') || undefined;
 
-    // Gather all unverified items across all patients or specific patient
-    const unverifiedItems: any[] = [];
-
-    const labs = Array.from(store.labResults.values()).filter(
-      l => (!patientId || l.patientId === patientId) && l.verificationStatus === 'UNVERIFIED'
-    );
-    labs.forEach(l => unverifiedItems.push({ ...l, entityType: 'LAB_RESULT' }));
-
-    const meds = Array.from(store.medications.values()).filter(
-      m => (!patientId || m.patientId === patientId) && m.verificationStatus === 'UNVERIFIED'
-    );
-    meds.forEach(m => unverifiedItems.push({ ...m, entityType: 'MEDICATION' }));
-
-    const allergies = Array.from(store.allergies.values()).filter(
-      a => (!patientId || a.patientId === patientId) && a.verificationStatus === 'UNVERIFIED'
-    );
-    allergies.forEach(a => unverifiedItems.push({ ...a, entityType: 'ALLERGY' }));
-
-    const conditions = Array.from(store.conditions.values()).filter(
-      c => (!patientId || c.patientId === patientId) && c.verificationStatus === 'UNVERIFIED'
-    );
-    conditions.forEach(c => unverifiedItems.push({ ...c, entityType: 'CONDITION' }));
+    const tasks = await VerificationService.getTasks({
+      patientId,
+      status,
+      reason,
+      recordType,
+    });
 
     return NextResponse.json({
       success: true,
-      count: unverifiedItems.length,
-      items: unverifiedItems,
+      count: tasks.length,
+      data: tasks,
+      items: tasks, // Backward compatibility
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -46,10 +40,15 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await verifyPatientAccess(req);
+    if (!auth.authorized) {
+      return NextResponse.json({ success: false, error: auth.error || 'Unauthorized' }, { status: 403 });
+    }
+
     const body = await req.json();
     const store = getStore();
 
-    // 1. Check for Bulk Verification Action
+    // 1. Bulk Verification
     if (body.action === 'BULK_ACCEPT_CONFIDENT') {
       const patientId = body.patientId;
       const minConfidence = body.minConfidence || 0.95;
@@ -70,7 +69,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 2. Standard Single Entity Verification
+    // 2. Single Action Verification (Direct or by ID)
     const validated = VerificationActionSchema.parse(body);
 
     const result = await store.verifyEntity(

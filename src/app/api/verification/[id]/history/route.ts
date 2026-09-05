@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { VerificationService } from '@/lib/services/verification/VerificationService';
 import { verifyPatientAccess } from '@/lib/security/auth';
 
-export async function POST(
+export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -13,18 +13,14 @@ export async function POST(
     }
 
     const { id } = await params;
-    const body = await req.json().catch(() => ({}));
-
-    const result = await VerificationService.acceptTask(id, {
-      userId: body.verifiedBy || body.userId || auth.userId || 'Dr. Sarah Jenkins, MD',
-      notes: body.notes || 'Accepted as clinically verified',
-    });
+    const history = await VerificationService.getTaskHistory(id);
 
     return NextResponse.json({
       success: true,
-      data: result.record || result.task,
-      task: result.task,
-      message: 'Entity verified successfully with HUMAN_VERIFIED provenance.',
+      taskId: id,
+      count: history.length,
+      history,
+      data: history,
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

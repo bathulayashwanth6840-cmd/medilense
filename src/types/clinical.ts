@@ -298,3 +298,71 @@ export interface AuditLogRecord {
   reason?: string | null;
   timestamp: string | Date;
 }
+
+export type VerificationTaskStatus =
+  | 'PENDING_REVIEW'
+  | 'IN_REVIEW'
+  | 'VERIFIED'
+  | 'EDITED'
+  | 'REJECTED';
+
+export type VerificationRequirementReason =
+  | 'LOW_EXTRACTION_CONFIDENCE'
+  | 'REFERENCE_RANGE_UNDETERMINED'
+  | 'CONFLICT_DETECTED'
+  | 'AMBIGUOUS_EXTRACTION'
+  | 'OCR_QUALITY_ISSUE'
+  | 'MISSING_SOURCE_EVIDENCE'
+  | 'AI_VALIDATION_RETRY'
+  | 'MULTIPLE_REFERENCE_RANGES'
+  | 'USER_REQUESTED_REVIEW'
+  | 'STANDARD_CLINICAL_INTAKE'
+  | string;
+
+export interface VerificationTask {
+  id: string;
+  recordId: string;
+  recordType: 'LAB_RESULT' | 'MEDICATION' | 'ALLERGY' | 'CONDITION' | 'CLINICAL_OBSERVATION' | 'CONFLICT' | string;
+  patientId: string;
+  documentId?: string | null;
+  status: VerificationTaskStatus;
+  reason: VerificationRequirementReason;
+  confidenceScore?: number | null;
+  assignedTo?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | Date | null;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+
+  // Hydrated references
+  record?: any;
+  patient?: PatientRecord | null;
+  document?: DocumentRecord | null;
+  provenance?: any;
+  conflict?: ConflictRecord | null;
+  history?: VerificationAction[];
+}
+
+export interface VerificationAction {
+  id: string;
+  taskId: string;
+  recordId: string;
+  patientId: string;
+  documentId?: string | null;
+  action:
+    | 'VERIFICATION_OPENED'
+    | 'RECORD_ACCEPTED'
+    | 'RECORD_EDITED'
+    | 'RECORD_REJECTED'
+    | 'CONFLICT_REVIEWED'
+    | 'CONFLICT_RESOLVED'
+    | 'CONFLICT_DISMISSED'
+    | 'SOURCE_VIEWED'
+    | 'VERIFICATION_COMPLETED';
+  previousValue?: any;
+  newValue?: any;
+  userId: string;
+  reason?: string | null;
+  timestamp: string | Date;
+}
+

@@ -13,6 +13,10 @@ import {
   ClinicalSummaryRecord,
   ConflictRecord,
   AuditLogRecord,
+  VerificationTask,
+  VerificationAction,
+  VerificationTaskStatus,
+  VerificationRequirementReason,
 } from '@/types/clinical';
 import { evaluateReferenceRange } from './ai/parsers';
 
@@ -35,6 +39,8 @@ class MedLensStore {
   auditLogs: Map<string, AuditLogRecord> = new Map();
   provenanceRecords: Map<string, any> = new Map();
   entityProvenanceHistory: Map<string, string[]> = new Map();
+  verificationTasks: Map<string, VerificationTask> = new Map();
+  verificationActions: Map<string, VerificationAction> = new Map();
 
   constructor() {
     // Clean initialized in-memory database - no dummy data
@@ -175,60 +181,6 @@ class MedLensStore {
     this.documents.set(id, doc);
     await this.logAudit(doc.patientId, 'DOCUMENT', id, 'CREATED', null, doc, 'USER', `Document uploaded: ${doc.originalFileName}`);
     return doc;
-  }
-
-  async getAllDocuments(): Promise<any[]> {
-    const list = Array.from(this.documents.values());
-    return list.map(doc => {
-      const patient = this.patients.get(doc.patientId);
-      return {
-        ...doc,
-        patientName: patient?.fullName || 'Unknown Patient',
-        patientIdentifier: patient?.identifier || '—',
-      };
-    }).sort((a, b) => new Date(b.uploadedAt || 0).getTime() - new Date(a.uploadedAt || 0).getTime());
-  }
-
-  async getDocumentById(id: string): Promise<any | null> {
-    const doc = this.documents.get(id);
-    if (!doc) return null;
-    const patient = this.patients.get(doc.patientId);
-    return {
-      ...doc,
-      patientName: patient?.fullName || 'Unknown Patient',
-      patientIdentifier: patient?.identifier || '—',
-    };
-  }
-
-  async getSummaryStats(): Promise<{
-    totalPatients: number;
-    totalDocuments: number;
-    pendingVerification: number;
-    activeConflicts: number;
-  }> {
-    const totalPatients = this.patients.size;
-    const totalDocuments = this.documents.size;
-    
-    // Unverified labs count
-    const unverifiedLabs = Array.from(this.labResults.values()).filter(
-      l => l.verificationStatus === 'UNVERIFIED'
-    ).length;
-    const unverifiedMeds = Array.from(this.medications.values()).filter(
-      m => m.verificationStatus === 'UNVERIFIED'
-    ).length;
-    const pendingVerification = unverifiedLabs + unverifiedMeds;
-
-    // Active unreviewed conflicts count
-    const activeConflicts = Array.from(this.conflicts.values()).filter(
-      c => c.resolutionStatus === 'UNREVIEWED' || c.resolutionStatus === 'DETECTED'
-    ).length;
-
-    return {
-      totalPatients,
-      totalDocuments,
-      pendingVerification,
-      activeConflicts,
-    };
   }
 
   // --- LAB RESULTS ---
@@ -959,23 +911,32 @@ class MedLensStore {
     totalPatients: number;
     totalDocuments: number;
     pendingVerification: number;
+    potentialConflicts: number;
     activeConflicts: number;
+    verifiedRecords: number;
+    totalVerificationTasks: number;
   }> {
-    const totalPatients = this.patients.size;
-    const totalDocuments = this.documents.size;
+    await this.syncVerificationTasks();
 
-    let pendingVerification = 0;
+    let verifiedCount = 0;
     for (const lab of this.labResults.values()) {
-      if (lab.verificationStatus === 'UNVERIFIED') pendingVerification++;
+      if (lab.verificationStatus === 'VERIFIED') verifiedCount++;
     }
     for (const med of this.medications.values()) {
-      if (med.verificationStatus === 'UNVERIFIED') pendingVerification++;
+      if (med.verificationStatus === 'VERIFIED') verifiedCount++;
     }
-    for (const all of this.allergies.values()) {
-      if (all.verificationStatus === 'UNVERIFIED') pendingVerification++;
+    for (const alg of this.allergies.values()) {
+      if (alg.verificationStatus === 'VERIFIED') verifiedCount++;
     }
     for (const cond of this.conditions.values()) {
-      if (cond.verificationStatus === 'UNVERIFIED') pendingVerification++;
+      if (cond.verificationStatus === 'VERIFIED') verifiedCount++;
+    }
+
+    let pendingVerification = 0;
+    for (const task of this.verificationTasks.values()) {
+      if (task.status === 'PENDING_REVIEW' || task.status === 'IN_REVIEW') {
+        pendingVerification++;
+      }
     }
 
     let activeConflicts = 0;
@@ -987,11 +948,480 @@ class MedLensStore {
     }
 
     return {
-      totalPatients,
-      totalDocuments,
+      totalPatients: this.patients.size,
+      totalDocuments: this.documents.size,
       pendingVerification,
+      potentialConflicts: activeConflicts,
       activeConflicts,
+      verifiedRecords: verifiedCount,
+      totalVerificationTasks: this.verificationTasks.size,
     };
+  }
+
+  // --- HUMAN VERIFICATION TASKS ENGINE ---
+  async createVerificationTask(data: Partial<VerificationTask>): Promise<VerificationTask> {
+    const id = data.id || `task_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+    const now = new Date();
+
+    const task: VerificationTask = {
+      id,
+      recordId: data.recordId!,
+      recordType: data.recordType || 'LAB_RESULT',
+      patientId: data.patientId!,
+      documentId: data.documentId || null,
+      status: data.status || 'PENDING_REVIEW',
+      reason: data.reason || 'LOW_EXTRACTION_CONFIDENCE',
+      confidenceScore: data.confidenceScore ?? 0.95,
+      assignedTo: data.assignedTo || null,
+      reviewedBy: data.reviewedBy || null,
+      reviewedAt: data.reviewedAt || null,
+      createdAt: data.createdAt || now,
+      updatedAt: data.updatedAt || now,
+    };
+
+    this.verificationTasks.set(id, task);
+    return task;
+  }
+
+  async getVerificationTasks(filter?: {
+    patientId?: string;
+    status?: string;
+    reason?: string;
+    recordType?: string;
+  }): Promise<VerificationTask[]> {
+    await this.syncVerificationTasks();
+
+    let list = Array.from(this.verificationTasks.values());
+
+    if (filter?.patientId) {
+      list = list.filter(t => t.patientId === filter.patientId);
+    }
+    if (filter?.status && filter.status !== 'ALL') {
+      const s = filter.status.toUpperCase();
+      list = list.filter(t => t.status.toUpperCase() === s);
+    }
+    if (filter?.reason && filter.reason !== 'ALL') {
+      list = list.filter(t => t.reason === filter.reason);
+    }
+    if (filter?.recordType && filter.recordType !== 'ALL') {
+      list = list.filter(t => t.recordType === filter.recordType);
+    }
+
+    const hydrated = list.map(t => this.hydrateVerificationTask(t));
+    return hydrated.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  hydrateVerificationTask(task: VerificationTask): VerificationTask {
+    const patient = this.patients.get(task.patientId) || null;
+    const document = task.documentId ? this.documents.get(task.documentId) || null : null;
+
+    let record: any = null;
+    if (task.recordType === 'LAB_RESULT') record = this.labResults.get(task.recordId);
+    else if (task.recordType === 'MEDICATION') record = this.medications.get(task.recordId);
+    else if (task.recordType === 'ALLERGY') record = this.allergies.get(task.recordId);
+    else if (task.recordType === 'CONDITION') record = this.conditions.get(task.recordId);
+    else if (task.recordType === 'CONFLICT') record = this.conflicts.get(task.recordId);
+
+    const provenance = record?.provenanceId ? this.provenanceRecords.get(record.provenanceId) : null;
+    const conflict = task.recordType === 'CONFLICT' ? record : (this.conflicts.get(task.recordId) || null);
+
+    const history: VerificationAction[] = [];
+    for (const act of this.verificationActions.values()) {
+      if (act.taskId === task.id || act.recordId === task.recordId) {
+        history.push(act);
+      }
+    }
+    history.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    return {
+      ...task,
+      record,
+      patient,
+      document,
+      provenance,
+      conflict,
+      history,
+    };
+  }
+
+  async getVerificationTaskById(idOrRecordId: string): Promise<VerificationTask | null> {
+    await this.syncVerificationTasks();
+    let task = this.verificationTasks.get(idOrRecordId);
+    if (!task) {
+      for (const t of this.verificationTasks.values()) {
+        if (t.recordId === idOrRecordId) {
+          task = t;
+          break;
+        }
+      }
+    }
+    if (!task) return null;
+    return this.hydrateVerificationTask(task);
+  }
+
+  async startVerification(taskIdOrRecordId: string, userId: string = 'Dr. Sarah Jenkins, MD'): Promise<VerificationTask | null> {
+    const task = await this.getVerificationTaskById(taskIdOrRecordId);
+    if (!task) return null;
+
+    task.status = 'IN_REVIEW';
+    task.assignedTo = userId;
+    task.updatedAt = new Date();
+    this.verificationTasks.set(task.id, task);
+
+    const actionId = `vact_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+    const actionRecord: VerificationAction = {
+      id: actionId,
+      taskId: task.id,
+      recordId: task.recordId,
+      patientId: task.patientId,
+      documentId: task.documentId,
+      action: 'VERIFICATION_OPENED',
+      userId,
+      reason: 'Reviewer opened verification workspace for side-by-side review',
+      timestamp: new Date(),
+    };
+    this.verificationActions.set(actionId, actionRecord);
+
+    await this.logAudit(
+      task.patientId,
+      task.recordType,
+      task.recordId,
+      'VERIFICATION_OPENED',
+      { status: 'PENDING_REVIEW' },
+      { status: 'IN_REVIEW' },
+      userId,
+      'Reviewer opened verification task'
+    );
+
+    return this.hydrateVerificationTask(task);
+  }
+
+  async acceptVerification(
+    taskIdOrRecordId: string,
+    params?: { userId?: string; notes?: string }
+  ): Promise<{ task: VerificationTask; record: any }> {
+    const task = await this.getVerificationTaskById(taskIdOrRecordId);
+    const userId = params?.userId || 'Dr. Sarah Jenkins, MD';
+    const notes = params?.notes || 'Accepted and verified by clinician';
+    const now = new Date();
+
+    let record: any = null;
+    if (task) {
+      task.status = 'VERIFIED';
+      task.reviewedBy = userId;
+      task.reviewedAt = now;
+      task.updatedAt = now;
+      this.verificationTasks.set(task.id, task);
+
+      record = await this.verifyEntity(task.patientId, task.recordType as any, task.recordId, 'ACCEPT', undefined, notes);
+
+      const actionId = `vact_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+      const actionRecord: VerificationAction = {
+        id: actionId,
+        taskId: task.id,
+        recordId: task.recordId,
+        patientId: task.patientId,
+        documentId: task.documentId,
+        action: 'RECORD_ACCEPTED',
+        userId,
+        reason: notes,
+        timestamp: now,
+      };
+      this.verificationActions.set(actionId, actionRecord);
+
+      await this.logAudit(
+        task.patientId,
+        task.recordType,
+        task.recordId,
+        'RECORD_ACCEPTED',
+        { verificationStatus: 'UNVERIFIED' },
+        { verificationStatus: 'VERIFIED' },
+        userId,
+        notes
+      );
+    } else {
+      for (const lab of this.labResults.values()) {
+        if (lab.id === taskIdOrRecordId) {
+          record = await this.verifyEntity(lab.patientId, 'LAB_RESULT', lab.id, 'ACCEPT', undefined, notes);
+          break;
+        }
+      }
+    }
+
+    return {
+      task: task ? this.hydrateVerificationTask(task) : ({} as any),
+      record,
+    };
+  }
+
+  async editVerification(
+    taskIdOrRecordId: string,
+    params: { editedValues: any; userId?: string; reason?: string }
+  ): Promise<{ task: VerificationTask; record: any }> {
+    const task = await this.getVerificationTaskById(taskIdOrRecordId);
+    const userId = params.userId || 'Dr. Sarah Jenkins, MD';
+    const reason = params.reason || 'Clinician manual correction';
+    const now = new Date();
+
+    let record: any = null;
+    if (task) {
+      task.status = 'EDITED';
+      task.reviewedBy = userId;
+      task.reviewedAt = now;
+      task.updatedAt = now;
+      this.verificationTasks.set(task.id, task);
+
+      const prevRecord = task.record ? { ...task.record } : null;
+      record = await this.verifyEntity(task.patientId, task.recordType as any, task.recordId, 'EDIT', params.editedValues, reason);
+
+      const actionId = `vact_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+      const actionRecord: VerificationAction = {
+        id: actionId,
+        taskId: task.id,
+        recordId: task.recordId,
+        patientId: task.patientId,
+        documentId: task.documentId,
+        action: 'RECORD_EDITED',
+        previousValue: prevRecord,
+        newValue: params.editedValues,
+        userId,
+        reason,
+        timestamp: now,
+      };
+      this.verificationActions.set(actionId, actionRecord);
+
+      await this.logAudit(
+        task.patientId,
+        task.recordType,
+        task.recordId,
+        'RECORD_EDITED',
+        prevRecord,
+        params.editedValues,
+        userId,
+        reason
+      );
+    }
+
+    return {
+      task: task ? this.hydrateVerificationTask(task) : ({} as any),
+      record,
+    };
+  }
+
+  async rejectVerification(
+    taskIdOrRecordId: string,
+    params: { userId?: string; reason: string }
+  ): Promise<{ task: VerificationTask; record: any }> {
+    if (!params.reason || !params.reason.trim()) {
+      throw new Error('A rejection reason must be provided (e.g. Incorrect extraction, Unsupported source, Wrong entity, Duplicate).');
+    }
+
+    const task = await this.getVerificationTaskById(taskIdOrRecordId);
+    const userId = params.userId || 'Dr. Sarah Jenkins, MD';
+    const now = new Date();
+
+    let record: any = null;
+    if (task) {
+      task.status = 'REJECTED';
+      task.reviewedBy = userId;
+      task.reviewedAt = now;
+      task.updatedAt = now;
+      this.verificationTasks.set(task.id, task);
+
+      record = await this.verifyEntity(task.patientId, task.recordType as any, task.recordId, 'REJECT', undefined, params.reason);
+
+      const actionId = `vact_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+      const actionRecord: VerificationAction = {
+        id: actionId,
+        taskId: task.id,
+        recordId: task.recordId,
+        patientId: task.patientId,
+        documentId: task.documentId,
+        action: 'RECORD_REJECTED',
+        userId,
+        reason: params.reason,
+        timestamp: now,
+      };
+      this.verificationActions.set(actionId, actionRecord);
+
+      await this.logAudit(
+        task.patientId,
+        task.recordType,
+        task.recordId,
+        'RECORD_REJECTED',
+        { verificationStatus: 'UNVERIFIED' },
+        { verificationStatus: 'REJECTED' },
+        userId,
+        params.reason
+      );
+    }
+
+    return {
+      task: task ? this.hydrateVerificationTask(task) : ({} as any),
+      record,
+    };
+  }
+
+  async getVerificationHistory(taskIdOrRecordId: string): Promise<VerificationAction[]> {
+    const list: VerificationAction[] = [];
+    for (const act of this.verificationActions.values()) {
+      if (act.taskId === taskIdOrRecordId || act.recordId === taskIdOrRecordId) {
+        list.push(act);
+      }
+    }
+    return list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }
+
+  async syncVerificationTasks(): Promise<void> {
+    // Ensure all unverified labs have a verification task
+    for (const lab of this.labResults.values()) {
+      let existingTask: VerificationTask | undefined;
+      for (const t of this.verificationTasks.values()) {
+        if (t.recordId === lab.id) { existingTask = t; break; }
+      }
+
+      if (!existingTask) {
+        let reason: VerificationRequirementReason = 'PENDING_REVIEW';
+        if ((lab.confidenceScore ?? 1.0) < 0.90) reason = 'LOW_EXTRACTION_CONFIDENCE';
+        else if (lab.interpretation === 'UNDETERMINED' || (lab.interpretation === 'REFERENCE_UNAVAILABLE' && lab.referenceRangeText)) reason = 'REFERENCE_RANGE_UNDETERMINED';
+        else if (!lab.sourceOriginalSnippet) reason = 'MISSING_SOURCE_EVIDENCE';
+
+        const status: VerificationTaskStatus =
+          lab.verificationStatus === 'VERIFIED' ? 'VERIFIED' :
+          lab.verificationStatus === 'REJECTED' ? 'REJECTED' :
+          lab.verificationStatus === 'EDITED' ? 'EDITED' : 'PENDING_REVIEW';
+
+        await this.createVerificationTask({
+          recordId: lab.id,
+          recordType: 'LAB_RESULT',
+          patientId: lab.patientId,
+          documentId: lab.documentId,
+          status,
+          reason,
+          confidenceScore: lab.confidenceScore,
+          createdAt: lab.createdAt,
+          updatedAt: lab.updatedAt,
+        });
+      }
+    }
+
+    // Ensure all unverified medications have a verification task
+    for (const med of this.medications.values()) {
+      let existingTask: VerificationTask | undefined;
+      for (const t of this.verificationTasks.values()) {
+        if (t.recordId === med.id) { existingTask = t; break; }
+      }
+
+      if (!existingTask) {
+        let reason: VerificationRequirementReason = 'PENDING_REVIEW';
+        if ((med.confidenceScore ?? 1.0) < 0.90) reason = 'LOW_EXTRACTION_CONFIDENCE';
+        else if (!med.sourceOriginalSnippet) reason = 'MISSING_SOURCE_EVIDENCE';
+
+        const status: VerificationTaskStatus =
+          med.verificationStatus === 'VERIFIED' ? 'VERIFIED' :
+          med.verificationStatus === 'REJECTED' ? 'REJECTED' :
+          med.verificationStatus === 'EDITED' ? 'EDITED' : 'PENDING_REVIEW';
+
+        await this.createVerificationTask({
+          recordId: med.id,
+          recordType: 'MEDICATION',
+          patientId: med.patientId,
+          documentId: med.documentId,
+          status,
+          reason,
+          confidenceScore: med.confidenceScore,
+          createdAt: med.createdAt,
+          updatedAt: med.updatedAt,
+        });
+      }
+    }
+
+    // Ensure all unverified allergies have a verification task
+    for (const all of this.allergies.values()) {
+      let existingTask: VerificationTask | undefined;
+      for (const t of this.verificationTasks.values()) {
+        if (t.recordId === all.id) { existingTask = t; break; }
+      }
+
+      if (!existingTask) {
+        let reason: VerificationRequirementReason = 'PENDING_REVIEW';
+        if ((all.confidenceScore ?? 1.0) < 0.90) reason = 'LOW_EXTRACTION_CONFIDENCE';
+
+        const status: VerificationTaskStatus =
+          all.verificationStatus === 'VERIFIED' ? 'VERIFIED' :
+          all.verificationStatus === 'REJECTED' ? 'REJECTED' :
+          all.verificationStatus === 'EDITED' ? 'EDITED' : 'PENDING_REVIEW';
+
+        await this.createVerificationTask({
+          recordId: all.id,
+          recordType: 'ALLERGY',
+          patientId: all.patientId,
+          documentId: all.documentId,
+          status,
+          reason,
+          confidenceScore: all.confidenceScore,
+          createdAt: all.createdAt,
+          updatedAt: all.updatedAt,
+        });
+      }
+    }
+
+    // Ensure all unverified conditions have a verification task
+    for (const cond of this.conditions.values()) {
+      let existingTask: VerificationTask | undefined;
+      for (const t of this.verificationTasks.values()) {
+        if (t.recordId === cond.id) { existingTask = t; break; }
+      }
+
+      if (!existingTask) {
+        let reason: VerificationRequirementReason = 'PENDING_REVIEW';
+        if ((cond.confidenceScore ?? 1.0) < 0.90) reason = 'LOW_EXTRACTION_CONFIDENCE';
+
+        const status: VerificationTaskStatus =
+          cond.verificationStatus === 'VERIFIED' ? 'VERIFIED' :
+          cond.verificationStatus === 'REJECTED' ? 'REJECTED' :
+          cond.verificationStatus === 'EDITED' ? 'EDITED' : 'PENDING_REVIEW';
+
+        await this.createVerificationTask({
+          recordId: cond.id,
+          recordType: 'CONDITION',
+          patientId: cond.patientId,
+          documentId: cond.documentId,
+          status,
+          reason,
+          confidenceScore: cond.confidenceScore,
+          createdAt: cond.createdAt,
+          updatedAt: cond.updatedAt,
+        });
+      }
+    }
+
+    // Ensure all unreviewed conflicts have a verification task
+    for (const conf of this.conflicts.values()) {
+      let existingTask: VerificationTask | undefined;
+      for (const t of this.verificationTasks.values()) {
+        if (t.recordId === conf.id) { existingTask = t; break; }
+      }
+
+      if (!existingTask) {
+        const status: VerificationTaskStatus =
+          conf.resolutionStatus === 'RESOLVED' ? 'VERIFIED' :
+          conf.resolutionStatus === 'DISMISSED' ? 'REJECTED' :
+          conf.resolutionStatus === 'REVIEWED' ? 'IN_REVIEW' : 'PENDING_REVIEW';
+
+        await this.createVerificationTask({
+          recordId: conf.id,
+          recordType: 'CONFLICT',
+          patientId: conf.patientId,
+          documentId: conf.sourceA?.documentId || conf.sourceB?.documentId || null,
+          status,
+          reason: 'CONFLICT_DETECTED',
+          confidenceScore: conf.detectionConfidence || 0.95,
+          createdAt: conf.detectedAt || new Date(),
+          updatedAt: conf.updatedAt || new Date(),
+        });
+      }
+    }
   }
 }
 
@@ -1008,6 +1438,12 @@ export function getStore(): MedLensStore {
   }
   if (!global.__medlens_store.conflictResolutions) {
     global.__medlens_store.conflictResolutions = new Map();
+  }
+  if (!global.__medlens_store.verificationTasks) {
+    global.__medlens_store.verificationTasks = new Map();
+  }
+  if (!global.__medlens_store.verificationActions) {
+    global.__medlens_store.verificationActions = new Map();
   }
   return global.__medlens_store;
 }
