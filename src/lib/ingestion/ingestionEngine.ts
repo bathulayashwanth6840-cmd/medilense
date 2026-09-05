@@ -58,8 +58,29 @@ async function extractTextFromPDF(buffer: Buffer): Promise<string | null> {
 }
 
 /**
+ * Performs Optical Character Recognition (OCR) on an image file buffer using Tesseract.js.
+ * Returns the extracted text transcript or null if OCR fails.
+ */
+async function extractTextFromImage(buffer: Buffer): Promise<string | null> {
+  try {
+    const { createWorker } = await import('tesseract.js');
+    const worker = await createWorker('eng');
+    const ret = await worker.recognize(buffer);
+    await worker.terminate();
+    
+    if (ret && ret.data && ret.data.text && ret.data.text.trim().length > 3) {
+      return ret.data.text.trim();
+    }
+    return null;
+  } catch (err: any) {
+    console.warn('Tesseract OCR extraction failed:', err?.message || err);
+    return null;
+  }
+}
+
+/**
  * Extracts readable text from a file buffer based on its MIME type.
- * Supports PDF parsing, plain text, and image files (with metadata fallback).
+ * Supports PDF parsing, plain text, and real Tesseract OCR for image files.
  */
 async function extractTextFromBuffer(
   buffer: Buffer,
@@ -74,7 +95,18 @@ async function extractTextFromBuffer(
     return buffer.toString('utf-8');
   }
 
-  // 2. For PDF files, use pdf-parse library for real extraction
+  // 2. For image files (scans, photos), run Tesseract.js OCR
+  if (
+    mimeType.startsWith('image/') ||
+    /\.(png|jpe?g|webp|bmp|tiff?)$/i.test(originalFileName)
+  ) {
+    const ocrText = await extractTextFromImage(buffer);
+    if (ocrText && ocrText.trim().length > 5) {
+      return ocrText;
+    }
+  }
+
+  // 3. For PDF files, use pdf-parse library for text extraction
   if (
     mimeType === 'application/pdf' ||
     mimeType === 'application/octet-stream' ||
@@ -85,21 +117,20 @@ async function extractTextFromBuffer(
       return pdfText;
     }
     
-    // If pdf-parse returned nothing (scanned/image-only PDF), try raw UTF-8
-    // to catch hybrid PDFs that embed some text
+    // If pdf-parse returned nothing (scanned PDF), try Tesseract OCR
+    const scannedPdfOcr = await extractTextFromImage(buffer);
+    if (scannedPdfOcr && scannedPdfOcr.trim().length > 5) {
+      return scannedPdfOcr;
+    }
+
+    // Try raw UTF-8 as fallback
     const rawUtf8 = buffer.toString('utf-8');
     const alphaRatio = (rawUtf8.match(/[a-zA-Z0-9]/g) || []).length / Math.max(rawUtf8.length, 1);
     if (alphaRatio > 0.3 && rawUtf8.length > 20) {
       return rawUtf8;
     }
     
-    // Truly image-only PDF — return informational message (NO fake data)
-    return `[Scanned PDF Document: ${originalFileName}]\nThis PDF appears to contain scanned images only.\nOCR processing would be required to extract text from image-based pages.\nNo text content could be automatically extracted from this document.`;
-  }
-
-  // 3. For image files (scans), return metadata only (NO fabricated data)
-  if (mimeType.startsWith('image/')) {
-    return `[Scanned Medical Image: ${originalFileName}]\nImage-based document uploaded.\nOCR/image text recognition would be required to extract clinical data.\nPlease use the Direct Text Input method to manually enter the clinical information from this scan.`;
+    return `[Scanned PDF Document: ${originalFileName}]\nNo readable text could be recognized from this scanned PDF.`;
   }
 
   // 4. Last resort: try UTF-8 interpretation
@@ -108,7 +139,7 @@ async function extractTextFromBuffer(
     return rawUtf8;
   }
 
-  return `[Unrecognized Document Format: ${originalFileName}]\nCould not extract text content from this file.\nPlease verify the file format or use Direct Text Input to enter the clinical data manually.`;
+  return `[Unrecognized Document Format: ${originalFileName}]\nCould not extract text content from this file.`;
 }
 
 export type ProcessingStatus = z.infer<typeof ProcessingStatusEnum>;

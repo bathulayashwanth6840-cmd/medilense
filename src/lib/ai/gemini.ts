@@ -199,10 +199,12 @@ function fallbackClinicalParser(text: string, fileName: string): ExtractedData {
     }
 
     // === MEDICATIONS ===
-    // Rx: format, Prescribed:, Medication:, or standalone drug patterns
+    // Rx: format, Prescribed:, Medication:, or standalone drug + dosage patterns
     const medPatterns = [
       /(?:rx|medication|taking|prescribed|drug)[:\s]+([a-zA-Z][a-zA-Z0-9\s()]+?)\s+([0-9]+(?:,[0-9]+)?(?:\.[0-9]+)?\s*(?:mg|mcg|ml|units?|mEq|IU|g))\s*(.*)?/i,
       /(?:rx|medication|prescribed)[:\s]+([a-zA-Z][a-zA-Z0-9\s()-]+?)(?:\s+(?:tab|cap|capsule|tablet)s?)?\s+([0-9]+(?:\.[0-9]+)?\s*(?:mg|mcg|ml|units?|mEq|IU|g))\s*(.*)?/i,
+      /\b(Acetaminophen|Paracetamol|Amoxicillin|Ibuprofen|Aspirin|Metformin|Atorvastatin|Lisinopril|Omeprazole|Levothyroxine|Amlodipine|Albuterol|Azithromycin|Ciprofloxacin|Doxycycline|Sertraline|Gabapentin|Hydrochlorothiazide|Losartan|Simvastatin|Montelukast|Prednisone|Ferrous\s+Sulfate|Cefdinir|Cephalexin|Augmentin|Tylenol|Advil|Motrin|Zithromax|Lipitor|Zocor|Prilosec|Synthroid|Norvasc|ProAir)\b\s*([0-9]+(?:\.[0-9]+)?\s*(?:mg|mcg|ml|units?|mEq|IU|g))\s*(.*)?/i,
+      /^([a-zA-Z][a-zA-Z0-9\s()-]{2,30})\s+([0-9]+(?:\.[0-9]+)?\s*(?:mg|mcg|ml|units?|mEq|IU|g))\s*(.*)?/i,
     ];
     for (const medPat of medPatterns) {
       if (medPat.test(line)) {
