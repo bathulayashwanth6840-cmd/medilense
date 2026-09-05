@@ -96,7 +96,12 @@ export default function DashboardPage() {
             <span>MedLens Clinical Intelligence</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-            Good morning
+            {(() => {
+              const hour = new Date().getHours();
+              if (hour < 12) return 'Good morning';
+              if (hour < 17) return 'Good afternoon';
+              return 'Good evening';
+            })()}
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
             Review, verify, and understand clinical information from medical documents with zero invented data.
