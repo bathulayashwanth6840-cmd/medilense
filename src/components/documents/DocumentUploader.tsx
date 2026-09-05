@@ -149,7 +149,7 @@ export default function DocumentUploader({
     setUploadProgress(10);
     setCurrentStatus('Uploading & computing SHA-256 checksum...');
 
-    let activePatientId = targetPatientId || patientId;
+    let activePatientId: string = targetPatientId || patientId || '';
     if (!activePatientId || activePatientId === 'AUTO_CREATE') {
       try {
         const createRes = await fetch('/api/patients', {
