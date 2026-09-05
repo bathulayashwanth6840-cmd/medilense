@@ -1,10 +1,18 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 
-// Protected Private Storage Directory (Strictly OUTSIDE public/ and static directories)
-const STORAGE_ROOT = path.resolve(process.cwd(), 'storage', 'secure_uploads');
+// Determine writable directory based on environment (Vercel serverless functions use /tmp)
+function getStorageRoot(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join(os.tmpdir(), 'medlens_uploads');
+  }
+  return path.resolve(process.cwd(), 'storage', 'secure_uploads');
+}
+
+const STORAGE_ROOT = getStorageRoot();
 
 // Maximum allowed file size: 30MB
 export const MAX_FILE_SIZE_BYTES = 30 * 1024 * 1024; // 31,457,280 bytes
@@ -42,10 +50,20 @@ export interface StoredFileMetadata {
  * Ensures the secure storage directory exists with proper permissions
  */
 export function ensureSecureStorageDir(): string {
-  if (!fs.existsSync(STORAGE_ROOT)) {
-    fs.mkdirSync(STORAGE_ROOT, { recursive: true, mode: 0o700 });
+  try {
+    const targetDir = getStorageRoot();
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true, mode: 0o700 });
+    }
+    return targetDir;
+  } catch (err) {
+    // Fallback to system OS tmpdir if project directory is read-only
+    const tmpDir = path.join(os.tmpdir(), 'medlens_uploads');
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
+    }
+    return tmpDir;
   }
-  return STORAGE_ROOT;
 }
 
 /**
@@ -183,9 +201,10 @@ export async function saveUploadedFile(
 export async function readUploadedFile(filePath: string): Promise<Buffer> {
   const resolved = path.resolve(filePath);
   const storageDir = ensureSecureStorageDir();
+  const tmpDir = os.tmpdir();
 
-  // Prevent path traversal breakout
-  if (!resolved.startsWith(storageDir)) {
+  // Prevent path traversal breakout - allow if in storageDir or os.tmpdir
+  if (!resolved.startsWith(storageDir) && !resolved.startsWith(tmpDir)) {
     throw new Error('Access denied: File is outside the authorized secure storage root.');
   }
 
@@ -203,7 +222,8 @@ export function isSecureStoragePath(filePath: string): boolean {
   try {
     const resolved = path.resolve(filePath);
     const storageDir = ensureSecureStorageDir();
-    return resolved.startsWith(storageDir);
+    const tmpDir = os.tmpdir();
+    return resolved.startsWith(storageDir) || resolved.startsWith(tmpDir);
   } catch {
     return false;
   }
