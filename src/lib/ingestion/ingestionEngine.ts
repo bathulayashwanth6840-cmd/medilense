@@ -213,7 +213,8 @@ export class MedLensIngestionEngine {
         }
       }
 
-      const extracted = await extractFromDocument(extractedText, storedFile.sanitizedFileName);
+      const imageBase64 = (mimeType.startsWith('image/') || mimeType === 'application/pdf') ? fileBuffer.toString('base64') : undefined;
+      const extracted = await extractFromDocument(extractedText, storedFile.sanitizedFileName, imageBase64, mimeType);
 
       // 5. STAGE: VALIDATING - Apply strict schemas & zero-guess reference ranges
       stagesCompleted.push('VALIDATING');
