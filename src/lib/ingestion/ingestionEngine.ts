@@ -59,19 +59,23 @@ async function extractTextFromPDF(buffer: Buffer): Promise<string | null> {
 
 /**
  * Performs Optical Character Recognition (OCR) on an image file buffer using Tesseract.js.
- * Returns the extracted text transcript or null if OCR fails.
+ * Returns the extracted text transcript or null if OCR fails or times out.
  */
 async function extractTextFromImage(buffer: Buffer): Promise<string | null> {
   try {
-    const { createWorker } = await import('tesseract.js');
-    const worker = await createWorker('eng');
-    const ret = await worker.recognize(buffer);
-    await worker.terminate();
-    
-    if (ret && ret.data && ret.data.text && ret.data.text.trim().length > 3) {
-      return ret.data.text.trim();
-    }
-    return null;
+    const ocrPromise = (async () => {
+      const { createWorker } = await import('tesseract.js');
+      const worker = await createWorker('eng');
+      const ret = await worker.recognize(buffer);
+      await worker.terminate();
+      if (ret && ret.data && ret.data.text && ret.data.text.trim().length > 3) {
+        return ret.data.text.trim();
+      }
+      return null;
+    })();
+
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
+    return await Promise.race([ocrPromise, timeoutPromise]);
   } catch (err: any) {
     console.warn('Tesseract OCR extraction failed:', err?.message || err);
     return null;

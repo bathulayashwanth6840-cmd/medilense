@@ -137,7 +137,7 @@ export default function DocumentUploader({
       setCurrentStageIndex(i);
       setCurrentStatus(PROCESSING_STAGES[i].label);
       setUploadProgress(Math.round(((i + 1) / PROCESSING_STAGES.length) * 100));
-      await new Promise(r => setTimeout(r, 280));
+      await new Promise(r => setTimeout(r, 60));
     }
   };
 
@@ -236,7 +236,7 @@ export default function DocumentUploader({
       setTimeout(() => {
         onUploadSuccess();
         if (onClose) onClose();
-      }, 900);
+      }, 300);
     } catch (err: any) {
       setErrorMessage(err.message || 'An unexpected error occurred during ingestion.');
       setCurrentStatus('Ingestion halted due to error');
