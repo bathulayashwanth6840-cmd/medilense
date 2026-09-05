@@ -1,0 +1,238 @@
+// Prisma Schema for MedLens - AI-Powered Clinical Information Intelligence
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Patient {
+  id               String                 @id @default(uuid())
+  identifier       String                 @unique // MRN / External ID
+  fullName         String
+  dateOfBirth      DateTime?
+  sex              String                 // MALE, FEMALE, OTHER, UNKNOWN
+  contactNumber    String?
+  bloodType        String?
+  emergencyContact String?
+  notes            String?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  documents        Document[]
+  labResults       LabResult[]
+  medications      Medication[]
+  allergies        Allergy[]
+  conditions       Condition[]
+  observations     ClinicalObservation[]
+  summaries        ClinicalSummary[]
+  conflicts        ConflictRecord[]
+  auditLogs        AuditLog[]
+}
+
+model Document {
+  id                 String                 @id @default(uuid())
+  patientId          String
+  patient            Patient                @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  originalFileName   String
+  fileType           String                 // PDF, IMAGE_JPEG, IMAGE_PNG, TEXT
+  fileSizeBytes      Int
+  fileHashSha256     String
+  storagePath        String?
+  documentType       String                 // LAB_REPORT, DISCHARGE_SUMMARY, PRESCRIPTION, IMAGING_REPORT, OTHER
+  reportDate         DateTime?
+  processingStatus   String                 @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  rawExtractedText   String?
+  uploadedAt         DateTime               @default(now())
+
+  labResults         LabResult[]
+  medications        Medication[]
+  allergies          Allergy[]
+  conditions         Condition[]
+  observations       ClinicalObservation[]
+}
+
+model LabResult {
+  id                    String    @id @default(uuid())
+  patientId             String
+  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  documentId            String?
+  document              Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  
+  testName              String
+  testCategory          String?
+  measuredValue         String
+  numericValue          Float?
+  unit                  String?
+  referenceRangeText    String?
+  refRangeLow           Float?
+  refRangeHigh          Float?
+  interpretation        String    // LOW, NORMAL, HIGH, REFERENCE_UNAVAILABLE
+  testDate              DateTime?
+  
+  provenanceSource      String    @default("DOCUMENT_EXTRACTED") // USER_PROVIDED, DOCUMENT_EXTRACTED, AI_GENERATED, USER_EDITED
+  sourcePageNumber      Int?
+  sourceOriginalSnippet String?
+  confidenceScore       Float?    @default(1.0)
+  
+  verificationStatus    String    @default("UNVERIFIED") // UNVERIFIED, VERIFIED, REJECTED, EDITED
+  verifiedBy            String?
+  verifiedAt            DateTime?
+  verificationNotes     String?
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Medication {
+  id                    String    @id @default(uuid())
+  patientId             String
+  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  documentId            String?
+  document              Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  
+  drugName              String
+  dosage                String?
+  frequency             String?
+  route                 String?
+  status                String    @default("ACTIVE") // ACTIVE, DISCONTINUED, HISTORICAL
+  startDate             DateTime?
+  endDate               DateTime?
+  prescribingDoctor     String?
+  
+  provenanceSource      String    @default("DOCUMENT_EXTRACTED") // USER_PROVIDED, DOCUMENT_EXTRACTED, AI_GENERATED, USER_EDITED
+  sourcePageNumber      Int?
+  sourceOriginalSnippet String?
+  confidenceScore       Float?    @default(1.0)
+  
+  verificationStatus    String    @default("UNVERIFIED") // UNVERIFIED, VERIFIED, REJECTED, EDITED
+  verifiedBy            String?
+  verifiedAt            DateTime?
+  verificationNotes     String?
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Allergy {
+  id                    String    @id @default(uuid())
+  patientId             String
+  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  documentId            String?
+  document              Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  
+  allergen              String
+  reaction              String?
+  severity              String    @default("UNKNOWN") // MILD, MODERATE, SEVERE, LIFE_THREATENING, UNKNOWN
+  
+  provenanceSource      String    @default("DOCUMENT_EXTRACTED") // USER_PROVIDED, DOCUMENT_EXTRACTED, AI_GENERATED, USER_EDITED
+  sourcePageNumber      Int?
+  sourceOriginalSnippet String?
+  confidenceScore       Float?    @default(1.0)
+  
+  verificationStatus    String    @default("UNVERIFIED") // UNVERIFIED, VERIFIED, REJECTED, EDITED
+  verifiedBy            String?
+  verifiedAt            DateTime?
+  verificationNotes     String?
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Condition {
+  id                    String    @id @default(uuid())
+  patientId             String
+  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  documentId            String?
+  document              Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  
+  conditionName         String
+  icd10Code             String?
+  clinicalStatus        String    @default("ACTIVE") // ACTIVE, RESOLVED, INACTIVE, RECURRENT
+  diagnosedDate         DateTime?
+  
+  provenanceSource      String    @default("DOCUMENT_EXTRACTED") // USER_PROVIDED, DOCUMENT_EXTRACTED, AI_GENERATED, USER_EDITED
+  sourcePageNumber      Int?
+  sourceOriginalSnippet String?
+  confidenceScore       Float?    @default(1.0)
+  
+  verificationStatus    String    @default("UNVERIFIED") // UNVERIFIED, VERIFIED, REJECTED, EDITED
+  verifiedBy            String?
+  verifiedAt            DateTime?
+  verificationNotes     String?
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model ClinicalObservation {
+  id                    String    @id @default(uuid())
+  patientId             String
+  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  documentId            String?
+  document              Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  
+  category              String    @default("CLINICIAN_NOTE") // PHYSICAL_EXAM, SYMPTOM, RADIOLOGY_NOTE, CLINICIAN_NOTE, HISTORY
+  content               String
+  observationDate       DateTime?
+  
+  provenanceSource      String    @default("DOCUMENT_EXTRACTED") // USER_PROVIDED, DOCUMENT_EXTRACTED, AI_GENERATED, USER_EDITED
+  sourcePageNumber      Int?
+  sourceOriginalSnippet String?
+  confidenceScore       Float?    @default(1.0)
+  
+  verificationStatus    String    @default("UNVERIFIED")
+  verifiedBy            String?
+  verifiedAt            DateTime?
+  verificationNotes     String?
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model ClinicalSummary {
+  id                    String    @id @default(uuid())
+  patientId             String
+  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  summaryText           String
+  keyFindingsJson       String?   // JSON Array
+  notableChangesJson    String?   // JSON Array
+  missingInformationJson String?  // JSON Array
+  guardrailValidation   String    @default("PASSED")
+  generatedAt           DateTime  @default(now())
+}
+
+model ConflictRecord {
+  id                    String    @id @default(uuid())
+  patientId             String
+  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  conflictType          String    // DEMOGRAPHIC_MISMATCH, MEDICATION_INCONSISTENCY, ALLERGY_DISCREPANCY, LAB_VALUE_DIVERGENCE, DATE_ANOMALY
+  entityType            String    // PATIENT, MEDICATION, ALLERGY, LAB_RESULT, CONDITION
+  description           String
+  conflictingRecordsJson String   // JSON Array of records
+  resolutionStatus      String    @default("DETECTED") // DETECTED, REVIEWED, RESOLVED, DISMISSED
+  resolvedBy            String?
+  resolutionNotes       String?
+  detectedAt            DateTime  @default(now())
+  resolvedAt            DateTime?
+}
+
+model AuditLog {
+  id                    String    @id @default(uuid())
+  patientId             String
+  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  entityType            String    // PATIENT, LAB_RESULT, MEDICATION, ALLERGY, CONDITION, CLINICAL_OBSERVATION, CONFLICT
+  entityId              String
+  action                String    // CREATED, AI_EXTRACTED, VERIFIED, EDITED, REJECTED, CONFLICT_RESOLVED
+  previousValuesJson    String?   // JSON representation
+  newValuesJson         String?   // JSON representation
+  performedBy           String    @default("USER") // USER, AI_ENGINE, SYSTEM
+  reason                String?
+  timestamp             DateTime  @default(now())
+}
