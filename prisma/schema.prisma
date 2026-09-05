@@ -1,238 +1,578 @@
-// Prisma Schema for MedLens - AI-Powered Clinical Information Intelligence
+// MedLens - Enterprise PostgreSQL Prisma Schema
+// Non-Diagnostic Clinical Information Intelligence & Medical Document Management
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 generator client {
   provider = "prisma-client-js"
 }
 
+// ==========================================
+// 1. ENUMS
+// ==========================================
+
+enum Sex {
+  MALE
+  FEMALE
+  OTHER
+  UNKNOWN
+}
+
+enum ProvenanceSource {
+  USER_PROVIDED
+  DOCUMENT_EXTRACTED
+  AI_GENERATED
+  USER_EDITED
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  REJECTED
+  EDITED
+}
+
+enum ReferenceStatus {
+  LOW
+  NORMAL
+  HIGH
+  REFERENCE_UNAVAILABLE
+  UNDETERMINED
+}
+
+enum DocumentType {
+  LAB_REPORT
+  PRESCRIPTION
+  DISCHARGE_SUMMARY
+  IMAGING_REPORT
+  CLINICIAN_NOTE
+  PATHOLOGY_REPORT
+  PATIENT_INTAKE_FORM
+  OTHER
+}
+
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum Severity {
+  MILD
+  MODERATE
+  SEVERE
+  LIFE_THREATENING
+  UNKNOWN
+}
+
+enum ClinicalStatus {
+  ACTIVE
+  RESOLVED
+  REMISSION
+  INACTIVE
+  RECURRENT
+}
+
+enum ConflictType {
+  MEDICATION_INCONSISTENCY
+  ALLERGY_DISCREPANCY
+  LAB_VALUE_DIVERGENCE
+  DEMOGRAPHIC_MISMATCH
+  DATE_ANOMALY
+  DUPLICATE_DISCREPANCY
+}
+
+enum ConflictResolutionStatus {
+  DETECTED
+  REVIEWED
+  RESOLVED
+  DISMISSED
+}
+
+enum ActorType {
+  USER
+  AI_ENGINE
+  SYSTEM
+}
+
+enum AuditAction {
+  CREATED
+  AI_EXTRACTED
+  CONFIDENCE_EVALUATED
+  VERIFIED
+  EDITED
+  REJECTED
+  BULK_VERIFIED
+  CONFLICT_DETECTED
+  CONFLICT_RESOLVED
+  VIEWED
+}
+
+// ==========================================
+// 2. PATIENT & IDENTITY MODELS
+// ==========================================
+
 model Patient {
-  id               String                 @id @default(uuid())
-  identifier       String                 @unique // MRN / External ID
-  fullName         String
-  dateOfBirth      DateTime?
-  sex              String                 // MALE, FEMALE, OTHER, UNKNOWN
-  contactNumber    String?
-  bloodType        String?
-  emergencyContact String?
-  notes            String?
-  createdAt        DateTime               @default(now())
-  updatedAt        DateTime               @updatedAt
+  id               String    @id @default(uuid()) @db.Uuid
+  identifier       String    @unique @db.VarChar(64) // e.g. MRN: ML-98214
+  fullName         String    @db.VarChar(255)
+  dateOfBirth      DateTime? @db.Date
+  sex              Sex       @default(UNKNOWN)
+  bloodType        String?   @db.VarChar(16) // e.g. A+, O-
+  contactNumber    String?   @db.VarChar(64)
+  emergencyContact String?   @db.Text
+  notes            String?   @db.Text
+  createdAt        DateTime  @default(now()) @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @db.Timestamptz
 
-  documents        Document[]
-  labResults       LabResult[]
-  medications      Medication[]
-  allergies        Allergy[]
-  conditions       Condition[]
-  observations     ClinicalObservation[]
-  summaries        ClinicalSummary[]
-  conflicts        ConflictRecord[]
-  auditLogs        AuditLog[]
+  profiles       PatientProfile[]
+  medicalReports MedicalReport[]
+  labResults     LabResult[]
+  medications    Medication[]
+  allergies      Allergy[]
+  conditions     Condition[]
+  symptoms       Symptom[]
+  observations   Observation[]
+  timelineEvents TimelineEvent[]
+  conflicts      Conflict[]
+  verifications  Verification[]
+  auditLogs      AuditLog[]
+  aiSummaries    AISummary[]
+
+  @@index([identifier])
+  @@index([fullName])
+  @@map("patients")
 }
 
-model Document {
-  id                 String                 @id @default(uuid())
-  patientId          String
-  patient            Patient                @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  originalFileName   String
-  fileType           String                 // PDF, IMAGE_JPEG, IMAGE_PNG, TEXT
-  fileSizeBytes      Int
-  fileHashSha256     String
-  storagePath        String?
-  documentType       String                 // LAB_REPORT, DISCHARGE_SUMMARY, PRESCRIPTION, IMAGING_REPORT, OTHER
-  reportDate         DateTime?
-  processingStatus   String                 @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
-  rawExtractedText   String?
-  uploadedAt         DateTime               @default(now())
+model PatientProfile {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @db.Uuid
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
-  labResults         LabResult[]
-  medications        Medication[]
-  allergies          Allergy[]
-  conditions         Condition[]
-  observations       ClinicalObservation[]
+  smokingStatus      String?  @default("UNKNOWN") @db.VarChar(64)
+  alcoholConsumption String?  @default("UNKNOWN") @db.VarChar(64)
+  occupation         String?  @db.VarChar(128)
+  intakeSource       String   @default("WEB_INTAKE_FORM") @db.VarChar(64)
+  recordedAt         DateTime @default(now()) @db.Timestamptz
+
+  @@index([patientId])
+  @@map("patient_profiles")
 }
+
+// ==========================================
+// 3. DOCUMENT & SPATIAL LAYOUT MODELS
+// ==========================================
+
+model MedicalReport {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @db.Uuid
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  originalFileName String           @db.VarChar(255)
+  fileType         String           @db.VarChar(32) // PDF, IMAGE_PNG, TEXT
+  fileSizeBytes    Int
+  fileHashSha256   String           @db.VarChar(64) // Cryptographic integrity
+  storagePath      String?          @db.Text
+  documentType     DocumentType     @default(LAB_REPORT)
+  reportDate       DateTime?        @db.Timestamptz
+  processingStatus ProcessingStatus @default(PENDING)
+  rawExtractedText String?          @db.Text
+  uploadedAt       DateTime         @default(now()) @db.Timestamptz
+
+  pages             ReportPage[]
+  extractedEntities ExtractedEntity[]
+  labResults        LabResult[]
+  medications       Medication[]
+  allergies         Allergy[]
+  conditions        Condition[]
+  symptoms          Symptom[]
+  observations      Observation[]
+  referenceRanges   ReferenceRange[]
+
+  @@index([patientId])
+  @@index([fileHashSha256])
+  @@index([documentType])
+  @@map("medical_reports")
+}
+
+model ReportPage {
+  id       String        @id @default(uuid()) @db.Uuid
+  reportId String        @db.Uuid
+  report   MedicalReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  pageNumber    Int
+  pageWidthPx   Int?
+  pageHeightPx  Int?
+  pageText      String? @db.Text
+  ocrConfidence Float?  @default(1.0)
+
+  extractedEntities ExtractedEntity[]
+
+  @@unique([reportId, pageNumber])
+  @@index([reportId])
+  @@map("report_pages")
+}
+
+model ExtractedEntity {
+  id       String         @id @default(uuid()) @db.Uuid
+  reportId String?        @db.Uuid
+  report   MedicalReport? @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  pageId   String?        @db.Uuid
+  page     ReportPage?    @relation(fields: [pageId], references: [id], onDelete: SetNull)
+
+  pageNumber       Int              @default(1)
+  entityType       String           @db.VarChar(64) // LAB_RESULT, MEDICATION, ALLERGY, etc.
+  rawExtractedJson String           @db.Text // Complete raw payload
+  boundingBoxJson  String?          @db.Text // { "x": 120, "y": 340, "w": 400, "h": 28 }
+  sourceSnippet    String?          @db.Text // Exact verbatim text matched in OCR
+  confidenceScore  Float            @default(0.95)
+  provenanceSource ProvenanceSource @default(DOCUMENT_EXTRACTED)
+  extractedAt      DateTime         @default(now()) @db.Timestamptz
+
+  labResults  LabResult[]
+  medications Medication[]
+  allergies   Allergy[]
+  conditions  Condition[]
+
+  @@index([reportId])
+  @@index([entityType])
+  @@map("extracted_entities")
+}
+
+// ==========================================
+// 4. REFERENCE RANGE (SEPARATE SOURCE-DERIVED)
+// ==========================================
+
+model ReferenceRange {
+  id       String         @id @default(uuid()) @db.Uuid
+  reportId String?        @db.Uuid
+  report   MedicalReport? @relation(fields: [reportId], references: [id], onDelete: SetNull)
+
+  testName                 String   @db.VarChar(255)
+  rawRangeText             String   @db.VarChar(128) // Verbatim string printed in source
+  lowBound                 Float? // Parsed lower bound (e.g. 13.0)
+  highBound                Float? // Parsed upper bound (e.g. 17.0)
+  unit                     String?  @db.VarChar(32)
+  isSourceDocumentProvided Boolean  @default(true) // ALWAYS true; AI never generates synthetic ranges
+  sourcePageNumber         Int?     @default(1)
+  sourceSnippet            String?  @db.Text
+  createdAt                DateTime @default(now()) @db.Timestamptz
+
+  labResults LabResult[]
+
+  @@index([testName])
+  @@index([reportId])
+  @@map("reference_ranges")
+}
+
+// ==========================================
+// 5. CLINICAL DOMAIN ENTITIES
+// ==========================================
 
 model LabResult {
-  id                    String    @id @default(uuid())
-  patientId             String
-  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  documentId            String?
-  document              Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
-  
-  testName              String
-  testCategory          String?
-  measuredValue         String
-  numericValue          Float?
-  unit                  String?
-  referenceRangeText    String?
-  refRangeLow           Float?
-  refRangeHigh          Float?
-  interpretation        String    // LOW, NORMAL, HIGH, REFERENCE_UNAVAILABLE
-  testDate              DateTime?
-  
-  provenanceSource      String    @default("DOCUMENT_EXTRACTED") // USER_PROVIDED, DOCUMENT_EXTRACTED, AI_GENERATED, USER_EDITED
-  sourcePageNumber      Int?
-  sourceOriginalSnippet String?
-  confidenceScore       Float?    @default(1.0)
-  
-  verificationStatus    String    @default("UNVERIFIED") // UNVERIFIED, VERIFIED, REJECTED, EDITED
-  verifiedBy            String?
-  verifiedAt            DateTime?
-  verificationNotes     String?
-  
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  id                String           @id @default(uuid()) @db.Uuid
+  patientId         String           @db.Uuid
+  patient           Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  documentId        String?          @db.Uuid
+  document          MedicalReport?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  extractedEntityId String?          @db.Uuid
+  extractedEntity   ExtractedEntity? @relation(fields: [extractedEntityId], references: [id], onDelete: SetNull)
+  referenceRangeId  String?          @db.Uuid
+  referenceRange    ReferenceRange?  @relation(fields: [referenceRangeId], references: [id], onDelete: SetNull)
+
+  testName          String          @db.VarChar(255) // e.g. Hemoglobin
+  testCategory      String?         @default("General Laboratory") @db.VarChar(128)
+  measuredValue     String          @db.VarChar(64) // e.g. "11.2"
+  normalizedValue   Float? // e.g. 11.2000
+  unit              String?         @db.VarChar(32) // e.g. "g/dL"
+  originalValueText String?         @db.Text // Verbatim raw extracted text
+  originalRangeText String?         @db.VarChar(128) // "13.0–17.0 g/dL" or NULL if unavailable
+  interpretation    ReferenceStatus @default(REFERENCE_UNAVAILABLE) // LOW, NORMAL, HIGH, etc.
+  testDate          DateTime        @db.Timestamptz
+
+  provenanceSource      ProvenanceSource   @default(DOCUMENT_EXTRACTED)
+  sourcePageNumber      Int?               @default(1)
+  sourceOriginalSnippet String?            @db.Text
+  confidenceScore       Float              @default(0.95)
+  verificationStatus    VerificationStatus @default(UNVERIFIED)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  verifications Verification[]
+
+  @@index([patientId, testDate])
+  @@index([testName])
+  @@index([verificationStatus])
+  @@map("lab_results")
 }
 
 model Medication {
-  id                    String    @id @default(uuid())
-  patientId             String
-  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  documentId            String?
-  document              Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
-  
-  drugName              String
-  dosage                String?
-  frequency             String?
-  route                 String?
-  status                String    @default("ACTIVE") // ACTIVE, DISCONTINUED, HISTORICAL
-  startDate             DateTime?
-  endDate               DateTime?
-  prescribingDoctor     String?
-  
-  provenanceSource      String    @default("DOCUMENT_EXTRACTED") // USER_PROVIDED, DOCUMENT_EXTRACTED, AI_GENERATED, USER_EDITED
-  sourcePageNumber      Int?
-  sourceOriginalSnippet String?
-  confidenceScore       Float?    @default(1.0)
-  
-  verificationStatus    String    @default("UNVERIFIED") // UNVERIFIED, VERIFIED, REJECTED, EDITED
-  verifiedBy            String?
-  verifiedAt            DateTime?
-  verificationNotes     String?
-  
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  id                String           @id @default(uuid()) @db.Uuid
+  patientId         String           @db.Uuid
+  patient           Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  documentId        String?          @db.Uuid
+  document          MedicalReport?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  extractedEntityId String?          @db.Uuid
+  extractedEntity   ExtractedEntity? @relation(fields: [extractedEntityId], references: [id], onDelete: SetNull)
+
+  drugName           String         @db.VarChar(255) // e.g. Metformin
+  dosage             String?        @db.VarChar(128) // e.g. "500 mg", "1000 mg"
+  normalizedDosageMg Float? // e.g. 500.0, 1000.0
+  frequency          String?        @db.VarChar(128) // e.g. "Twice daily with meals"
+  route              String?        @default("Oral") @db.VarChar(64)
+  status             ClinicalStatus @default(ACTIVE)
+  originalValueText  String?        @db.Text
+  reportDate         DateTime?      @db.Timestamptz
+  startDate          DateTime?      @db.Date
+  endDate            DateTime?      @db.Date
+
+  provenanceSource      ProvenanceSource   @default(DOCUMENT_EXTRACTED)
+  sourcePageNumber      Int?               @default(1)
+  sourceOriginalSnippet String?            @db.Text
+  confidenceScore       Float              @default(0.95)
+  verificationStatus    VerificationStatus @default(UNVERIFIED)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  verifications Verification[]
+
+  @@index([patientId])
+  @@index([drugName])
+  @@index([verificationStatus])
+  @@map("medications")
 }
 
 model Allergy {
-  id                    String    @id @default(uuid())
-  patientId             String
-  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  documentId            String?
-  document              Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
-  
-  allergen              String
-  reaction              String?
-  severity              String    @default("UNKNOWN") // MILD, MODERATE, SEVERE, LIFE_THREATENING, UNKNOWN
-  
-  provenanceSource      String    @default("DOCUMENT_EXTRACTED") // USER_PROVIDED, DOCUMENT_EXTRACTED, AI_GENERATED, USER_EDITED
-  sourcePageNumber      Int?
-  sourceOriginalSnippet String?
-  confidenceScore       Float?    @default(1.0)
-  
-  verificationStatus    String    @default("UNVERIFIED") // UNVERIFIED, VERIFIED, REJECTED, EDITED
-  verifiedBy            String?
-  verifiedAt            DateTime?
-  verificationNotes     String?
-  
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  id                String           @id @default(uuid()) @db.Uuid
+  patientId         String           @db.Uuid
+  patient           Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  documentId        String?          @db.Uuid
+  document          MedicalReport?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  extractedEntityId String?          @db.Uuid
+  extractedEntity   ExtractedEntity? @relation(fields: [extractedEntityId], references: [id], onDelete: SetNull)
+
+  allergen          String    @db.VarChar(255) // e.g. Penicillin
+  reaction          String?   @db.Text // e.g. Urticaria / Cutaneous rash
+  severity          Severity  @default(MILD)
+  originalValueText String?   @db.Text
+  reportDate        DateTime? @db.Timestamptz
+
+  provenanceSource      ProvenanceSource   @default(DOCUMENT_EXTRACTED)
+  sourcePageNumber      Int?               @default(1)
+  sourceOriginalSnippet String?            @db.Text
+  confidenceScore       Float              @default(0.95)
+  verificationStatus    VerificationStatus @default(UNVERIFIED)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  verifications Verification[]
+
+  @@index([patientId])
+  @@index([allergen])
+  @@map("allergies")
 }
 
 model Condition {
-  id                    String    @id @default(uuid())
-  patientId             String
-  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  documentId            String?
-  document              Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
-  
-  conditionName         String
-  icd10Code             String?
-  clinicalStatus        String    @default("ACTIVE") // ACTIVE, RESOLVED, INACTIVE, RECURRENT
-  diagnosedDate         DateTime?
-  
-  provenanceSource      String    @default("DOCUMENT_EXTRACTED") // USER_PROVIDED, DOCUMENT_EXTRACTED, AI_GENERATED, USER_EDITED
-  sourcePageNumber      Int?
-  sourceOriginalSnippet String?
-  confidenceScore       Float?    @default(1.0)
-  
-  verificationStatus    String    @default("UNVERIFIED") // UNVERIFIED, VERIFIED, REJECTED, EDITED
-  verifiedBy            String?
-  verifiedAt            DateTime?
-  verificationNotes     String?
-  
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  id                String           @id @default(uuid()) @db.Uuid
+  patientId         String           @db.Uuid
+  patient           Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  documentId        String?          @db.Uuid
+  document          MedicalReport?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  extractedEntityId String?          @db.Uuid
+  extractedEntity   ExtractedEntity? @relation(fields: [extractedEntityId], references: [id], onDelete: SetNull)
+
+  conditionName     String         @db.VarChar(255)
+  icd10Code         String?        @db.VarChar(32)
+  clinicalStatus    ClinicalStatus @default(ACTIVE)
+  originalValueText String?        @db.Text
+  diagnosedDate     DateTime?      @db.Date
+
+  provenanceSource      ProvenanceSource   @default(DOCUMENT_EXTRACTED)
+  sourcePageNumber      Int?               @default(1)
+  sourceOriginalSnippet String?            @db.Text
+  confidenceScore       Float              @default(0.95)
+  verificationStatus    VerificationStatus @default(UNVERIFIED)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  verifications Verification[]
+
+  @@index([patientId])
+  @@index([conditionName])
+  @@map("conditions")
 }
 
-model ClinicalObservation {
-  id                    String    @id @default(uuid())
-  patientId             String
-  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  documentId            String?
-  document              Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
-  
-  category              String    @default("CLINICIAN_NOTE") // PHYSICAL_EXAM, SYMPTOM, RADIOLOGY_NOTE, CLINICIAN_NOTE, HISTORY
-  content               String
-  observationDate       DateTime?
-  
-  provenanceSource      String    @default("DOCUMENT_EXTRACTED") // USER_PROVIDED, DOCUMENT_EXTRACTED, AI_GENERATED, USER_EDITED
-  sourcePageNumber      Int?
-  sourceOriginalSnippet String?
-  confidenceScore       Float?    @default(1.0)
-  
-  verificationStatus    String    @default("UNVERIFIED")
-  verifiedBy            String?
-  verifiedAt            DateTime?
-  verificationNotes     String?
-  
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+model Symptom {
+  id         String         @id @default(uuid()) @db.Uuid
+  patientId  String         @db.Uuid
+  patient    Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  documentId String?        @db.Uuid
+  document   MedicalReport? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  symptomName         String    @db.VarChar(255)
+  severity            Severity  @default(MILD)
+  onsetDate           DateTime? @db.Date
+  durationDescription String?   @db.VarChar(128)
+  notes               String?   @db.Text
+
+  provenanceSource   ProvenanceSource   @default(USER_PROVIDED)
+  confidenceScore    Float              @default(1.0)
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  @@index([patientId])
+  @@map("symptoms")
 }
 
-model ClinicalSummary {
-  id                    String    @id @default(uuid())
-  patientId             String
-  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  
-  summaryText           String
-  keyFindingsJson       String?   // JSON Array
-  notableChangesJson    String?   // JSON Array
-  missingInformationJson String?  // JSON Array
-  guardrailValidation   String    @default("PASSED")
-  generatedAt           DateTime  @default(now())
+model Observation {
+  id         String         @id @default(uuid()) @db.Uuid
+  patientId  String         @db.Uuid
+  patient    Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  documentId String?        @db.Uuid
+  document   MedicalReport? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  category        String    @default("CLINICIAN_NOTE") @db.VarChar(64) // PHYSICAL_EXAM, RADIOLOGY, NOTE
+  content         String    @db.Text
+  observationDate DateTime? @db.Timestamptz
+
+  provenanceSource      ProvenanceSource   @default(DOCUMENT_EXTRACTED)
+  sourcePageNumber      Int?               @default(1)
+  sourceOriginalSnippet String?            @db.Text
+  confidenceScore       Float              @default(0.95)
+  verificationStatus    VerificationStatus @default(UNVERIFIED)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  @@index([patientId])
+  @@map("observations")
 }
 
-model ConflictRecord {
-  id                    String    @id @default(uuid())
-  patientId             String
-  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  
-  conflictType          String    // DEMOGRAPHIC_MISMATCH, MEDICATION_INCONSISTENCY, ALLERGY_DISCREPANCY, LAB_VALUE_DIVERGENCE, DATE_ANOMALY
-  entityType            String    // PATIENT, MEDICATION, ALLERGY, LAB_RESULT, CONDITION
-  description           String
-  conflictingRecordsJson String   // JSON Array of records
-  resolutionStatus      String    @default("DETECTED") // DETECTED, REVIEWED, RESOLVED, DISMISSED
-  resolvedBy            String?
-  resolutionNotes       String?
-  detectedAt            DateTime  @default(now())
-  resolvedAt            DateTime?
+// ==========================================
+// 6. TIMELINE, CONFLICTS & VERIFICATIONS
+// ==========================================
+
+model TimelineEvent {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @db.Uuid
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  eventDate          DateTime @db.Timestamptz
+  eventType          String   @db.VarChar(64) // INTAKE, LAB_REPORT, MEDICATION, CONFLICT
+  title              String   @db.VarChar(255)
+  subtitle           String?  @db.Text
+  badgeText          String?  @db.VarChar(64)
+  sourceDocumentName String?  @db.VarChar(255)
+  entityId           String?  @db.VarChar(64)
+  createdAt          DateTime @default(now()) @db.Timestamptz
+
+  @@index([patientId, eventDate(sort: Desc)])
+  @@map("timeline_events")
 }
+
+model Conflict {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @db.Uuid
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  conflictType           ConflictType             @default(MEDICATION_INCONSISTENCY)
+  entityType             String                   @db.VarChar(64) // MEDICATION, ALLERGY, LAB_RESULT
+  description            String                   @db.Text
+  conflictingRecordsJson String                   @db.Text // JSON representation of opposing sources
+  resolutionStatus       ConflictResolutionStatus @default(DETECTED)
+  resolvedBy             String?                  @db.VarChar(128)
+  resolutionNotes        String?                  @db.Text // Mandatory clinical justification
+  detectedAt             DateTime                 @default(now()) @db.Timestamptz
+  resolvedAt             DateTime?                @db.Timestamptz
+
+  verifications Verification[]
+
+  @@index([patientId, resolutionStatus])
+  @@map("conflicts")
+}
+
+model Verification {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @db.Uuid
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  entityType String             @db.VarChar(64) // LAB_RESULT, MEDICATION, ALLERGY, CONFLICT
+  entityId   String             @db.VarChar(64)
+  action     VerificationStatus @default(VERIFIED) // VERIFIED, EDITED, REJECTED
+
+  labResultId  String?     @db.Uuid
+  labResult    LabResult?  @relation(fields: [labResultId], references: [id], onDelete: SetNull)
+  medicationId String?     @db.Uuid
+  medication   Medication? @relation(fields: [medicationId], references: [id], onDelete: SetNull)
+  allergyId    String?     @db.Uuid
+  allergy      Allergy?    @relation(fields: [allergyId], references: [id], onDelete: SetNull)
+  conditionId  String?     @db.Uuid
+  condition    Condition?  @relation(fields: [conditionId], references: [id], onDelete: SetNull)
+  conflictId   String?     @db.Uuid
+  conflict     Conflict?   @relation(fields: [conflictId], references: [id], onDelete: SetNull)
+
+  verifiedBy         String   @db.VarChar(128) // Clinician name / ID
+  verifiedAt         DateTime @default(now()) @db.Timestamptz
+  clinicalReason     String?  @db.Text
+  previousValuesJson String?  @db.Text
+  newValuesJson      String?  @db.Text
+
+  auditLogs AuditLog[]
+
+  @@index([patientId])
+  @@index([entityType, entityId])
+  @@map("verifications")
+}
+
+// ==========================================
+// 7. IMMUTABLE AUDIT TRAIL & AI SUMMARY
+// ==========================================
 
 model AuditLog {
-  id                    String    @id @default(uuid())
-  patientId             String
-  patient               Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  
-  entityType            String    // PATIENT, LAB_RESULT, MEDICATION, ALLERGY, CONDITION, CLINICAL_OBSERVATION, CONFLICT
-  entityId              String
-  action                String    // CREATED, AI_EXTRACTED, VERIFIED, EDITED, REJECTED, CONFLICT_RESOLVED
-  previousValuesJson    String?   // JSON representation
-  newValuesJson         String?   // JSON representation
-  performedBy           String    @default("USER") // USER, AI_ENGINE, SYSTEM
-  reason                String?
-  timestamp             DateTime  @default(now())
+  id             String        @id @default(uuid()) @db.Uuid
+  patientId      String        @db.Uuid
+  patient        Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  verificationId String?       @db.Uuid
+  verification   Verification? @relation(fields: [verificationId], references: [id], onDelete: SetNull)
+
+  entityType         String      @db.VarChar(64) // PATIENT, LAB_RESULT, MEDICATION, CONFLICT
+  entityId           String      @db.VarChar(64)
+  action             AuditAction @default(AI_EXTRACTED)
+  previousValuesJson String?     @db.Text // JSON representation of state before modification
+  newValuesJson      String?     @db.Text // JSON representation of state after modification
+  performedBy        ActorType   @default(USER) // USER, AI_ENGINE, SYSTEM
+  performerId        String?     @db.VarChar(128)
+  reason             String?     @db.Text // Mandatory clinical justification
+  timestamp          DateTime    @default(now()) @db.Timestamptz
+
+  @@index([patientId, timestamp(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model AISummary {
+  id        String  @id @default(uuid()) @db.Uuid
+  patientId String  @db.Uuid
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  summaryText              String   @db.Text
+  keyFindingsJson          String?  @db.Text // JSON Array of bullet points
+  notableChangesJson       String?  @db.Text // JSON Array of temporal progression
+  missingInformationJson   String?  @db.Text // JSON Array of documented gaps
+  guardrailVersion         String   @default("v2.4-strict-neutral") @db.VarChar(32)
+  isSourceGrounded         Boolean  @default(true)
+  hasNoDiagnosticInference Boolean  @default(true)
+  generatedAt              DateTime @default(now()) @db.Timestamptz
+
+  @@index([patientId])
+  @@map("ai_summaries")
 }
