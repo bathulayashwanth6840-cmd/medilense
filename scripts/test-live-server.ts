@@ -141,6 +141,46 @@ async function testLiveServer() {
           console.log(`         Verified provenance history appended immutable version (History Length: ${hLen}).`);
         }
       }
+
+      // 8. Conflict Detection Engine Endpoints
+      console.log('\n  --- Testing Conflict Detection Engine Endpoints ---');
+      const allConflicts = await checkRoute('/api/conflicts', 'GET');
+      console.log(`         Loaded ${allConflicts?.data?.length || 0} active conflicts.`);
+      await checkRoute('/api/conflicts?status=UNREVIEWED', 'GET');
+      await checkRoute('/api/conflicts?type=MEDICATION', 'GET');
+      await checkRoute('/api/conflicts?severity=HIGH', 'GET');
+
+      const seededConf = await checkRoute('/api/conflicts/conf-1', 'GET');
+      if (seededConf?.data?.id) {
+        console.log(`         Verified details for conflict: ${seededConf.data.id} (${seededConf.data.type})`);
+      }
+
+      await checkRoute('/api/records/med-demo-metformin-1/conflicts', 'GET');
+
+      // Test Review endpoint
+      await checkRoute('/api/conflicts/conf-1/review', 'POST', {
+        reviewerId: 'rev-dr-jenkins',
+      });
+
+      // Test Resolve endpoint (with CORRECT_VALUE creating USER_EDITED provenance)
+      await checkRoute('/api/conflicts/conf-1/resolve', 'POST', {
+        reviewerId: 'rev-dr-jenkins',
+        decision: 'CORRECT_VALUE',
+        correctedValue: 'Metformin 750 mg PO BID with meals',
+        reason: 'Adjusted dosage reconciled between clinic and hospital records',
+      });
+
+      // Test Reopen endpoint
+      await checkRoute('/api/conflicts/conf-1/reopen', 'POST', {
+        reviewerId: 'rev-dr-jenkins',
+        reason: 'New laboratory data received, re-evaluating renal safety dosage',
+      });
+
+      // Test Dismiss endpoint
+      await checkRoute('/api/conflicts/conf-1/dismiss', 'POST', {
+        reviewerId: 'rev-dr-jenkins',
+        reason: 'Confirmed temporal medication step-up therapy',
+      });
     }
   }
 

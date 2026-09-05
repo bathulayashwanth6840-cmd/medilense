@@ -21,23 +21,14 @@ export async function POST(
     }
 
     const body = await req.json().catch(() => ({}));
-    const decision = body.decision || 'ACCEPT_SOURCE_A';
-    const reason = body.reason || body.notes || 'Conflict resolved by clinician review';
     const reviewerId = body.reviewerId || auth.userId || 'Dr. Sarah Jenkins, MD';
-    const selectedRecordId = body.selectedRecordId || null;
-    const correctedValue = body.correctedValue || null;
+    const notes = body.notes || 'Conflict reviewed by clinician';
 
-    const updated = await store.resolveConflict(id, {
-      reviewerId,
-      decision,
-      selectedRecordId,
-      correctedValue,
-      reason,
-    });
+    const updated = await store.reviewConflict(id, reviewerId, notes);
 
     return NextResponse.json({
       success: true,
-      message: `Conflict successfully resolved (${decision})`,
+      message: 'Conflict marked as REVIEWED',
       data: updated,
     });
   } catch (error: any) {

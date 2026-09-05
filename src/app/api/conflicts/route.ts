@@ -1,66 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStore } from '@/lib/dataStore';
-import { detectClinicalConflicts } from '@/lib/ai/conflictEngine';
+import { verifyPatientAccess } from '@/lib/security/auth';
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const patientId = searchParams.get('patientId');
+    const patientId = searchParams.get('patientId') || undefined;
+    const status = searchParams.get('status') || undefined;
+    const type = searchParams.get('type') || undefined;
+    const severity = searchParams.get('severity') || undefined;
 
-    if (!patientId) {
-      return NextResponse.json({ success: false, error: 'patientId is required' }, { status: 400 });
-    }
-
-    const store = getStore();
-    const patient = await store.getPatientById(patientId);
-    if (!patient) {
-      return NextResponse.json({ success: false, error: 'Patient not found' }, { status: 404 });
-    }
-
-    return NextResponse.json({ success: true, data: patient.conflicts || [] });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const patientId = body.patientId;
-
-    if (!patientId) {
-      return NextResponse.json({ success: false, error: 'patientId is required' }, { status: 400 });
-    }
-
-    const store = getStore();
-    const patient = await store.getPatientById(patientId);
-    if (!patient) {
-      return NextResponse.json({ success: false, error: 'Patient not found' }, { status: 404 });
-    }
-
-    const detected = detectClinicalConflicts(patient);
-    const added = [];
-
-    for (const d of detected) {
-      const existing = (patient.conflicts || []).find(
-        c => c.conflictType === d.conflictType && c.description === d.description
-      );
-      if (!existing) {
-        const conf = await store.addConflict({
-          patientId,
-          conflictType: d.conflictType,
-          entityType: d.entityType,
-          description: d.description,
-          conflictingRecordsJson: JSON.stringify(d.conflictingRecords),
-          resolutionStatus: 'DETECTED',
-        });
-        added.push(conf);
+    if (patientId) {
+      const auth = await verifyPatientAccess(req, patientId);
+      if (!auth.authorized) {
+        return NextResponse.json({ success: false, error: auth.error || 'Unauthorized' }, { status: 403 });
       }
     }
 
-    const updated = await store.getPatientById(patientId);
-    return NextResponse.json({ success: true, data: updated?.conflicts || [] });
+    const store = getStore();
+    const conflicts = await store.getConflicts({
+      patientId,
+      status,
+      type,
+      severity,
+    });
+
+    return NextResponse.json({
+      success: true,
+      count: conflicts.length,
+      data: conflicts,
+    });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message || 'Server error' }, { status: 500 });
   }
 }

@@ -25,6 +25,16 @@ export type ReferenceInterpretation =
   | 'UNDETERMINED';
 
 export type ConflictType = 
+  | 'PATIENT_IDENTIFIER'
+  | 'AGE_DOB'
+  | 'SEX'
+  | 'ALLERGY'
+  | 'MEDICATION'
+  | 'CONDITION'
+  | 'REPORT_DATE'
+  | 'DUPLICATE_TEST'
+  | 'LAB_VALUE'
+  | 'EXTRACTED_ENTITY'
   | 'DEMOGRAPHIC_MISMATCH'
   | 'MEDICATION_INCONSISTENCY'
   | 'MEDICATION_DOSAGE_DISCREPANCY'
@@ -35,10 +45,11 @@ export type ConflictType =
   | 'DUPLICATE_DISCREPANCY';
 
 export type ConflictResolutionStatus = 
-  | 'DETECTED'
+  | 'UNREVIEWED'
   | 'REVIEWED'
   | 'RESOLVED'
-  | 'DISMISSED';
+  | 'DISMISSED'
+  | 'DETECTED';
 
 export type DocumentType = 
   | 'LAB_REPORT'
@@ -263,6 +274,10 @@ export interface ConflictRecord {
   conflictType: ConflictType;
   entityType: 'PATIENT' | 'MEDICATION' | 'ALLERGY' | 'LAB_RESULT' | 'CONDITION' | string;
   description: string;
+  severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  detectionConfidence?: number;
+  sourceA?: any;
+  sourceB?: any;
   conflictingRecordsJson: string; // JSON parsed into Array
   resolutionStatus: ConflictResolutionStatus;
   resolvedBy?: string | null;

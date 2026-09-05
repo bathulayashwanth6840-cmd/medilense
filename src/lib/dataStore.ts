@@ -30,7 +30,8 @@ class MedLensStore {
   conditions: Map<string, ConditionRecord> = new Map();
   observations: Map<string, ClinicalObservationRecord> = new Map();
   summaries: Map<string, ClinicalSummaryRecord> = new Map();
-  conflicts: Map<string, ConflictRecord> = new Map();
+  conflicts: Map<string, any> = new Map();
+  conflictResolutions: Map<string, any> = new Map();
   auditLogs: Map<string, AuditLogRecord> = new Map();
   provenanceRecords: Map<string, any> = new Map();
   entityProvenanceHistory: Map<string, string[]> = new Map();
@@ -431,37 +432,239 @@ class MedLensStore {
   }
 
   // --- CONFLICTS ---
-  async addConflict(data: Partial<ConflictRecord>): Promise<ConflictRecord> {
-    const id = data.id || uuidv4();
-    const conf: ConflictRecord = {
+  async addConflict(data: any): Promise<any> {
+    const id = data.id || `conf_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+    const conf = {
       id,
-      patientId: data.patientId!,
-      conflictType: data.conflictType || 'MEDICATION_INCONSISTENCY',
+      patientId: data.patientId,
+      type: data.type || data.conflictType || 'MEDICATION',
+      conflictType: data.type || data.conflictType || 'MEDICATION',
       entityType: data.entityType || 'MEDICATION',
       description: data.description || 'Potential conflict detected — human verification required.',
-      conflictingRecordsJson: typeof data.conflictingRecordsJson === 'string' ? data.conflictingRecordsJson : JSON.stringify(data.conflictingRecordsJson || []),
-      resolutionStatus: data.resolutionStatus || 'DETECTED',
-      resolvedBy: data.resolvedBy || null,
-      resolutionNotes: data.resolutionNotes || null,
-      detectedAt: new Date(),
-      resolvedAt: data.resolvedAt || null,
+      severity: data.severity || 'MEDIUM',
+      detectionConfidence: data.detectionConfidence ?? 0.95,
+      sourceA: data.sourceA || null,
+      sourceB: data.sourceB || null,
+      conflictingRecordsJson: data.conflictingRecordsJson || (data.sourceA && data.sourceB ? JSON.stringify([data.sourceA, data.sourceB]) : '[]'),
+      resolutionStatus: data.resolutionStatus || 'UNREVIEWED',
+      detectedTimestamp: data.detectedTimestamp || new Date().toISOString(),
+      detectedAt: data.detectedAt || new Date(),
+      createdAt: data.createdAt || new Date().toISOString(),
+      updatedAt: data.updatedAt || new Date().toISOString(),
     };
 
     this.conflicts.set(id, conf);
+    await this.logAudit(
+      conf.patientId,
+      'CONFLICT',
+      id,
+      'CONFLICT_DETECTED',
+      null,
+      conf,
+      'SYSTEM',
+      `Conflict detected: ${conf.description}`
+    );
     return conf;
   }
 
-  async resolveConflict(conflictId: string, resolutionNotes: string, resolvedBy: string = 'Dr. Clinical Reviewer'): Promise<ConflictRecord | null> {
+  async getConflicts(filter?: { patientId?: string; status?: string; type?: string; severity?: string }): Promise<any[]> {
+    let list = Array.from(this.conflicts.values());
+    if (filter?.patientId) list = list.filter(c => c.patientId === filter.patientId);
+    if (filter?.status) {
+      const s = filter.status.toUpperCase();
+      list = list.filter(c => {
+        const current = (c.resolutionStatus || '').toUpperCase();
+        if (s === 'UNREVIEWED') return current === 'UNREVIEWED' || current === 'DETECTED';
+        return current === s;
+      });
+    }
+    if (filter?.type) list = list.filter(c => (c.type || c.conflictType) === filter.type);
+    if (filter?.severity) list = list.filter(c => c.severity === filter.severity);
+    return list.sort((a, b) => new Date(b.detectedTimestamp || b.detectedAt || 0).getTime() - new Date(a.detectedTimestamp || a.detectedAt || 0).getTime());
+  }
+
+  async getConflictById(id: string): Promise<any | null> {
+    return this.conflicts.get(id) || null;
+  }
+
+  async getConflictsByRecordId(recordId: string): Promise<any[]> {
+    const list: any[] = [];
+    for (const conf of this.conflicts.values()) {
+      const recAId = conf.sourceA?.recordId;
+      const recBId = conf.sourceB?.recordId;
+      if (recAId === recordId || recBId === recordId) {
+        list.push(conf);
+        continue;
+      }
+      try {
+        const records = JSON.parse(conf.conflictingRecordsJson || '[]');
+        if (records.some((r: any) => r.id === recordId || r.recordId === recordId)) {
+          list.push(conf);
+        }
+      } catch {}
+    }
+    return list;
+  }
+
+  async reviewConflict(conflictId: string, reviewerId: string = 'Dr. Sarah Jenkins, MD', notes?: string): Promise<any | null> {
     const conf = this.conflicts.get(conflictId);
     if (!conf) return null;
 
-    conf.resolutionStatus = 'RESOLVED';
-    conf.resolutionNotes = resolutionNotes;
-    conf.resolvedBy = resolvedBy;
-    conf.resolvedAt = new Date();
-
+    conf.resolutionStatus = 'REVIEWED';
+    conf.reviewedBy = reviewerId;
+    conf.reviewedAt = new Date().toISOString();
+    conf.updatedAt = new Date().toISOString();
     this.conflicts.set(conflictId, conf);
-    await this.logAudit(conf.patientId, 'CONFLICT', conflictId, 'CONFLICT_RESOLVED', null, conf, 'USER', `Conflict resolved: ${resolutionNotes}`);
+
+    await this.logAudit(
+      conf.patientId,
+      'CONFLICT',
+      conflictId,
+      'CONFLICT_REVIEWED',
+      { resolutionStatus: 'UNREVIEWED' },
+      conf,
+      reviewerId,
+      notes || 'Conflict moved to REVIEWED status by clinician'
+    );
+    return conf;
+  }
+
+  async resolveConflict(
+    conflictId: string,
+    params: {
+      reviewerId?: string;
+      decision: string;
+      selectedRecordId?: string | null;
+      correctedValue?: any;
+      reason: string;
+    } | string
+  ): Promise<any | null> {
+    const conf = this.conflicts.get(conflictId);
+    if (!conf) return null;
+
+    const previousStatus = conf.resolutionStatus;
+    const isStringParam = typeof params === 'string';
+    const reason = isStringParam ? params : params.reason;
+    const decision = isStringParam ? 'RESOLVED' : params.decision || 'RESOLVED';
+    const reviewerId = isStringParam ? 'Dr. Sarah Jenkins, MD' : params.reviewerId || 'Dr. Sarah Jenkins, MD';
+    const selectedRecordId = isStringParam ? null : params.selectedRecordId || null;
+    const correctedValue = isStringParam ? null : params.correctedValue || null;
+
+    conf.resolutionStatus = 'RESOLVED';
+    conf.resolvedBy = reviewerId;
+    conf.resolvedAt = new Date();
+    conf.resolutionNotes = reason;
+    conf.updatedAt = new Date().toISOString();
+
+    const resolutionRecord = {
+      id: `res_${uuidv4().replace(/-/g, '').slice(0, 10)}`,
+      conflictId,
+      resolutionStatus: 'RESOLVED' as const,
+      reviewerId,
+      timestamp: new Date().toISOString(),
+      decision,
+      selectedRecordId,
+      correctedValue,
+      reason,
+    };
+    conf.resolution = resolutionRecord;
+    this.conflictResolutions.set(conflictId, resolutionRecord);
+    this.conflicts.set(conflictId, conf);
+
+    // If a corrected value was entered, create a USER_EDITED provenance record!
+    if (decision === 'CORRECT_VALUE' && correctedValue) {
+      const pProvId = `prov_${uuidv4().replace(/-/g, '').slice(0, 10)}`;
+      await this.addProvenance({
+        id: pProvId,
+        provenanceId: pProvId,
+        entityId: selectedRecordId || conf.sourceA?.recordId || conflictId,
+        entityType: conf.entityType || 'CLINICAL_RECORD',
+        provenanceType: 'USER_EDITED',
+        version: 2,
+        previousValue: conf.sourceA?.value,
+        newValue: correctedValue,
+        userId: reviewerId,
+        action: 'CONFLICT_CORRECTION',
+        reason,
+        timestamp: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    await this.logAudit(
+      conf.patientId,
+      'CONFLICT',
+      conflictId,
+      'CONFLICT_RESOLVED',
+      { resolutionStatus: previousStatus },
+      conf,
+      reviewerId,
+      `Conflict resolved (${decision}): ${reason}`
+    );
+    return conf;
+  }
+
+  async dismissConflict(conflictId: string, reviewerId: string = 'Dr. Sarah Jenkins, MD', reason: string = 'Dismissed by clinician'): Promise<any | null> {
+    const conf = this.conflicts.get(conflictId);
+    if (!conf) return null;
+
+    const previousStatus = conf.resolutionStatus;
+    conf.resolutionStatus = 'DISMISSED';
+    conf.resolvedBy = reviewerId;
+    conf.resolvedAt = new Date();
+    conf.resolutionNotes = reason;
+    conf.updatedAt = new Date().toISOString();
+
+    const dismissalRecord = {
+      id: `res_${uuidv4().replace(/-/g, '').slice(0, 10)}`,
+      conflictId,
+      resolutionStatus: 'DISMISSED' as const,
+      reviewerId,
+      timestamp: new Date().toISOString(),
+      decision: 'DISMISSED',
+      selectedRecordId: null,
+      correctedValue: null,
+      reason,
+    };
+    conf.resolution = dismissalRecord;
+    this.conflictResolutions.set(conflictId, dismissalRecord);
+    this.conflicts.set(conflictId, conf);
+
+    await this.logAudit(
+      conf.patientId,
+      'CONFLICT',
+      conflictId,
+      'CONFLICT_DISMISSED',
+      { resolutionStatus: previousStatus },
+      conf,
+      reviewerId,
+      `Conflict dismissed: ${reason}`
+    );
+    return conf;
+  }
+
+  async reopenConflict(conflictId: string, reviewerId: string = 'Dr. Sarah Jenkins, MD', reason: string = 'Reopened for clinical reconsideration'): Promise<any | null> {
+    const conf = this.conflicts.get(conflictId);
+    if (!conf) return null;
+
+    const previousStatus = conf.resolutionStatus;
+    conf.resolutionStatus = 'UNREVIEWED';
+    conf.resolvedBy = null;
+    conf.resolvedAt = null;
+    conf.resolutionNotes = null;
+    conf.updatedAt = new Date().toISOString();
+    this.conflicts.set(conflictId, conf);
+
+    await this.logAudit(
+      conf.patientId,
+      'CONFLICT',
+      conflictId,
+      'CONFLICT_REOPENED',
+      { resolutionStatus: previousStatus },
+      conf,
+      reviewerId,
+      `Conflict reopened: ${reason}`
+    );
     return conf;
   }
 
@@ -835,12 +1038,38 @@ class MedLensStore {
     }
 
     // Seed Conflict
-    const conf1: ConflictRecord = {
+    const conf1: any = {
       id: 'conf-1',
       patientId,
-      conflictType: 'MEDICATION_INCONSISTENCY',
+      type: 'MEDICATION',
+      conflictType: 'MEDICATION',
       entityType: 'MEDICATION',
       description: 'Potential conflict detected — human verification required: Metformin dosage differs between Patient Intake (500 mg) and Medical Report (1000 mg).',
+      severity: 'HIGH',
+      detectionConfidence: 0.96,
+      sourceA: {
+        recordId: 'med-2',
+        documentId: null,
+        documentName: 'Patient Intake Form',
+        pageNumber: 1,
+        sourceText: 'Current Medications: Metformin 500 mg once daily',
+        value: '500 mg',
+        field: 'Medication Dosage',
+        provenanceId: 'prov-med-2-v1',
+        timestamp: '2026-09-02T08:30:00Z',
+      },
+      sourceB: {
+        recordId: 'med-1',
+        documentId: doc1Id,
+        documentName: 'LabCorp_CBC_2026.pdf',
+        pageNumber: 1,
+        sourceText: 'Rx: Metformin 1000 mg PO twice daily with meals',
+        value: '1000 mg',
+        field: 'Medication Dosage',
+        provenanceId: 'prov-med-1-v1',
+        timestamp: '2026-09-05T11:15:00Z',
+        boundingBox: { x: 50, y: 350, width: 500, height: 50 },
+      },
       conflictingRecordsJson: JSON.stringify([
         {
           id: 'med-2',
@@ -859,7 +1088,8 @@ class MedLensStore {
           confidence: '96%',
         },
       ]),
-      resolutionStatus: 'DETECTED',
+      resolutionStatus: 'UNREVIEWED',
+      detectedTimestamp: '2026-09-05T11:16:10Z',
       detectedAt: new Date('2026-09-05T11:16:10Z'),
     };
     this.conflicts.set(conf1.id, conf1);
@@ -1066,6 +1296,9 @@ export function getStore(): MedLensStore {
   }
   if (!global.__medlens_store.entityProvenanceHistory) {
     global.__medlens_store.entityProvenanceHistory = new Map();
+  }
+  if (!global.__medlens_store.conflictResolutions) {
+    global.__medlens_store.conflictResolutions = new Map();
   }
   return global.__medlens_store;
 }

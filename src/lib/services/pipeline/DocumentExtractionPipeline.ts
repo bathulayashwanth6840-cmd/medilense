@@ -5,6 +5,7 @@ import { NormalizationService } from '../normalization/NormalizationService';
 import { ProvenanceService } from '../provenance/ProvenanceService';
 import { ConfidenceService } from '../confidence/ConfidenceService';
 import { ConflictDetectionService } from '../conflicts/ConflictDetectionService';
+import { conflictDetectionEngine } from '../conflicts/ConflictDetectionEngine';
 import { AuditService } from '../audit/AuditService';
 import { getStore } from '@/lib/dataStore';
 import { ClinicalExtraction } from '../validation/schemas';
@@ -233,23 +234,16 @@ export class DocumentExtractionPipeline {
     // 8. Step 7: Conflict Detection & Human Review Flagging
     let detectedConflictsCount = 0;
     if (patient) {
-      const conflicts = ConflictDetectionService.detectConflicts(patient, enrichedWithProvenance, documentId);
+      const conflicts = conflictDetectionEngine.detectAllConflicts(patient, enrichedWithProvenance, documentId);
       for (const conf of conflicts) {
-        await store.addConflict({
-          patientId,
-          conflictType: conf.conflictType,
-          entityType: conf.entityType,
-          description: conf.description,
-          conflictingRecordsJson: JSON.stringify(conf.conflictingRecords),
-          resolutionStatus: 'DETECTED',
-        });
+        await store.addConflict(conf);
         detectedConflictsCount++;
 
         await AuditService.recordEvent({
           patientId,
           documentId,
           eventType: 'CONFLICT_DETECTED',
-          entityType: conf.entityType,
+          entityType: conf.type || 'CLINICAL_ENTITY',
           reason: conf.description,
         });
       }

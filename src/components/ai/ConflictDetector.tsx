@@ -1,317 +1,251 @@
 'use client';
 
 import React, { useState } from 'react';
-import { 
-  AlertTriangle, 
-  CheckCircle2, 
-  HelpCircle, 
-  ArrowRight, 
-  ShieldAlert, 
-  Check, 
-  Columns3, 
-  X,
-  FileSearch,
-  Sparkles
+import {
+  AlertTriangle,
+  CheckCircle2,
+  HelpCircle,
+  ShieldAlert,
+  Filter,
+  Columns3,
+  RotateCcw,
+  Sparkles,
+  Layers,
 } from 'lucide-react';
-import { ConflictRecord } from '@/types/clinical';
-import { formatDate } from '@/lib/utils/formatters';
+import { Conflict } from '@/lib/services/conflicts/ConflictTypes';
+import { ConflictCard } from '@/components/conflicts/ConflictCard';
+import { SideBySideReviewModal } from '@/components/conflicts/SideBySideReviewModal';
+import { ConflictResolutionModal } from '@/components/conflicts/ConflictResolutionModal';
 
 interface ConflictDetectorProps {
-  conflicts: ConflictRecord[];
-  onResolveConflict: (conflictId: string, notes: string) => Promise<void>;
+  conflicts: (Conflict | any)[];
+  onResolveConflict?: (conflictId: string, notes: string) => Promise<void>;
+  onRefresh?: () => Promise<void>;
 }
 
 export default function ConflictDetector({
   conflicts,
   onResolveConflict,
+  onRefresh,
 }: ConflictDetectorProps) {
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
-  const [resolutionNote, setResolutionNote] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [comparingConflict, setComparingConflict] = useState<ConflictRecord | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [severityFilter, setSeverityFilter] = useState<string>('ALL');
+  const [comparingConflict, setComparingConflict] = useState<Conflict | null>(null);
+  const [resolvingConflict, setResolvingConflict] = useState<Conflict | null>(null);
+  const [isActionInProgress, setIsActionInProgress] = useState(false);
 
-  const pending = conflicts.filter(c => c.resolutionStatus === 'DETECTED');
-  const resolved = conflicts.filter(c => c.resolutionStatus === 'RESOLVED');
+  // Normalize status for filtering
+  const filteredConflicts = conflicts.filter((c) => {
+    const s = (c.resolutionStatus || 'UNREVIEWED').toUpperCase();
+    if (statusFilter === 'UNREVIEWED' && s !== 'UNREVIEWED' && s !== 'DETECTED') return false;
+    if (statusFilter === 'REVIEWED' && s !== 'REVIEWED') return false;
+    if (statusFilter === 'RESOLVED' && s !== 'RESOLVED') return false;
+    if (statusFilter === 'DISMISSED' && s !== 'DISMISSED') return false;
 
-  const handleOpenResolve = (conflict: ConflictRecord) => {
-    setResolvingId(conflict.id);
-    setResolutionNote('');
+    if (severityFilter !== 'ALL' && (c.severity || 'MEDIUM').toUpperCase() !== severityFilter) {
+      return false;
+    }
+    return true;
+  });
+
+  const unreviewedCount = conflicts.filter(
+    (c) => (c.resolutionStatus || 'UNREVIEWED') === 'UNREVIEWED' || c.resolutionStatus === 'DETECTED'
+  ).length;
+  const criticalCount = conflicts.filter((c) => c.severity === 'CRITICAL').length;
+  const highCount = conflicts.filter((c) => c.severity === 'HIGH').length;
+  const resolvedCount = conflicts.filter((c) => c.resolutionStatus === 'RESOLVED').length;
+
+  const handleResolveAction = async (
+    conflictId: string,
+    decision: 'ACCEPT_SOURCE_A' | 'ACCEPT_SOURCE_B' | 'KEEP_BOTH' | 'CORRECT_VALUE' | 'DISMISSED',
+    reason: string,
+    correctedValue?: any,
+    selectedRecordId?: string | null
+  ) => {
+    setIsActionInProgress(true);
+    try {
+      if (decision === 'DISMISSED') {
+        const res = await fetch(`/api/conflicts/${conflictId}/dismiss`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason }),
+        });
+        if (!res.ok) throw new Error('Failed to dismiss conflict');
+      } else {
+        const res = await fetch(`/api/conflicts/${conflictId}/resolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            decision,
+            reason,
+            correctedValue,
+            selectedRecordId,
+          }),
+        });
+        if (!res.ok) throw new Error('Failed to resolve conflict');
+      }
+
+      if (onResolveConflict) {
+        await onResolveConflict(conflictId, reason);
+      }
+      if (onRefresh) {
+        await onRefresh();
+      }
+    } catch (err) {
+      console.error('Resolution error:', err);
+    } finally {
+      setIsActionInProgress(false);
+    }
   };
 
-  const handleConfirmResolve = async (customNote?: string) => {
-    const note = customNote || resolutionNote;
-    const targetId = resolvingId || comparingConflict?.id;
-    if (!targetId || !note) return;
-    
-    setIsSubmitting(true);
+  const handleReopenAction = async (conflictId: string) => {
+    setIsActionInProgress(true);
     try {
-      await onResolveConflict(targetId, note);
-      setResolvingId(null);
-      setComparingConflict(null);
+      const res = await fetch(`/api/conflicts/${conflictId}/reopen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Reopened by reviewer from Conflict Center' }),
+      });
+      if (!res.ok) throw new Error('Failed to reopen conflict');
+      if (onRefresh) await onRefresh();
+    } catch (err) {
+      console.error('Reopen error:', err);
     } finally {
-      setIsSubmitting(false);
+      setIsActionInProgress(false);
     }
   };
 
   return (
     <div className="space-y-6">
-      {/* 5. Potential Conflict Attention Card */}
-      {pending.length > 0 && (
-        <div className="bg-amber-50/60 dark:bg-amber-950/20 border-2 border-amber-500/40 dark:border-amber-500/30 rounded-2xl shadow-xs p-5 transition">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-amber-500/20">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-400 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-amber-950 dark:text-amber-100 flex items-center gap-2">
-                  ⚠ Potential Conflict Detected
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/25 text-amber-900 dark:text-amber-200 uppercase tracking-wider">
-                    Human Review Required
-                  </span>
-                </h3>
-                <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
-                  Contradictory values found across documents. MedLens never guesses clinical truth.
-                </p>
-              </div>
-            </div>
+      {/* Overview Banner */}
+      <div className="bg-gradient-to-r from-amber-500/10 via-slate-500/5 to-rose-500/10 dark:from-amber-950/30 dark:via-slate-900/40 dark:to-rose-950/30 border border-amber-500/20 rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-700 dark:text-amber-400 flex items-center justify-center shadow-md shadow-amber-500/10 shrink-0">
+            <AlertTriangle className="w-6 h-6" />
           </div>
-
-          <div className="space-y-4 mt-4">
-            {pending.map((conf) => (
-              <div
-                key={conf.id}
-                className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-amber-300/70 dark:border-amber-800/50 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-extrabold text-slate-900 dark:text-slate-100">
-                      Metformin
-                    </span>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                      Dosage Inconsistency
-                    </span>
-                  </div>
-
-                  <ul className="text-xs space-y-1 text-slate-700 dark:text-slate-300 list-disc list-inside">
-                    <li>
-                      Patient Intake: <strong className="text-slate-900 dark:text-white font-mono">500 mg</strong> (Sep 2, 2026)
-                    </li>
-                    <li>
-                      Medical Report: <strong className="text-slate-900 dark:text-white font-mono">1000 mg</strong> (Sep 5, 2026, 96% confidence)
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="flex items-center gap-2.5 shrink-0">
-                  <button
-                    onClick={() => setComparingConflict(conf)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 shadow-xs transition cursor-pointer"
-                  >
-                    <Columns3 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                    Compare Sources
-                  </button>
-
-                  <button
-                    onClick={() => handleOpenResolve(conf)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-teal-600 hover:bg-teal-500 text-white shadow-xs transition cursor-pointer"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    Resolve Conflict
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Resolved Conflicts History */}
-      {resolved.length > 0 && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm p-5">
-          <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-3">
-            Resolved Conflicts Audit Changelog ({resolved.length})
-          </h4>
-          <div className="space-y-2 text-xs">
-            {resolved.map((res) => (
-              <div
-                key={res.id}
-                className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 flex items-start justify-between gap-3"
-              >
-                <div>
-                  <span className="font-semibold text-slate-800 dark:text-slate-200 block">
-                    {res.description}
-                  </span>
-                  <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1">
-                    <strong>Resolution Rationale:</strong> {res.resolutionNotes}
-                  </p>
-                  <span className="text-[10px] text-slate-400 mt-1 block">
-                    Resolved by {res.resolvedBy || 'Clinical Reviewer'} on {formatDate(res.resolvedAt)}
-                  </span>
-                </div>
-                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shrink-0">
-                  Resolved
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 5. Comparison Modal ("Compare Sources") */}
-      {comparingConflict && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full p-6 space-y-5 animate-in fade-in zoom-in duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-                  <FileSearch className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                    Compare Sources — Metformin Dosage
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    Side-by-side reconciliation of contradicting source evidence
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setComparingConflict(null)}
-                className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                Clinical Conflict Detection & Reconciliation Center
+              </h2>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30 uppercase tracking-wider">
+                Human-in-the-Loop
+              </span>
             </div>
-
-            {/* Comparison Table */}
-            <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-100/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
-                  <tr>
-                    <th className="px-4 py-3">Source</th>
-                    <th className="px-4 py-3">Dose</th>
-                    <th className="px-4 py-3">Date</th>
-                    <th className="px-4 py-3">Confidence</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
-                  <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                    <td className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200">
-                      Patient Intake
-                    </td>
-                    <td className="px-4 py-3 font-mono font-bold text-teal-600 dark:text-teal-400">
-                      500 mg
-                    </td>
-                    <td className="px-4 py-3 text-slate-500">
-                      Sep 2, 2026
-                    </td>
-                    <td className="px-4 py-3 font-mono text-slate-400">
-                      —
-                    </td>
-                  </tr>
-                  <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                    <td className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200">
-                      Medical Report (LabCorp_CBC_2026.pdf)
-                    </td>
-                    <td className="px-4 py-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                      1000 mg
-                    </td>
-                    <td className="px-4 py-3 text-slate-500">
-                      Sep 5, 2026
-                    </td>
-                    <td className="px-4 py-3 font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                      96%
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-900 dark:text-amber-200">
-              <span className="font-semibold block mb-0.5">Clinical Decision Policy:</span>
-              MedLens does not automatically choose the correct value. Select an action below based on your clinical assessment:
-            </div>
-
-            {/* Action Buttons: [ Keep 500 mg ] [ Keep 1000 mg ] [ Mark for Review ] */}
-            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => handleConfirmResolve('Clinician verified: Kept 500 mg dosage based on patient intake and ongoing regimen.')}
-                disabled={isSubmitting}
-                className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 hover:text-teal-700 dark:hover:text-teal-300 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 transition cursor-pointer"
-              >
-                Keep 500 mg
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmResolve('Clinician verified: Kept 1000 mg dosage based on recent laboratory prescription extract.')}
-                disabled={isSubmitting}
-                className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-700 dark:hover:text-indigo-300 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 transition cursor-pointer"
-              >
-                Keep 1000 mg
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleConfirmResolve('Marked for pharmacist/provider review at next clinical encounter.')}
-                disabled={isSubmitting}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-teal-600 hover:bg-teal-500 text-white shadow-sm transition cursor-pointer"
-              >
-                Mark for Review
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Manual Resolution Rationale Modal */}
-      {resolvingId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-md w-full p-6 animate-in fade-in zoom-in duration-150">
-            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 mb-1">
-              Confirm Conflict Resolution
-            </h3>
-            <p className="text-xs text-slate-500 mb-4">
-              Enter your clinical rationale. This entry will be permanently written to the immutable audit changelog.
+            <p className="text-xs text-slate-500 mt-0.5">
+              Identifies contradictions across reports without guessing. Clinicians retain 100% decision authority.
             </p>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-                  Resolution Decision & Clinical Rationale <span className="text-rose-500">*</span>
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  value={resolutionNote}
-                  onChange={(e) => setResolutionNote(e.target.value)}
-                  placeholder="e.g. Verified with patient that Metformin was titrated to 500mg twice daily."
-                  className="w-full px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-teal-500"
-                />
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setResolvingId(null)}
-                className="px-4 py-2 rounded-xl font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => handleConfirmResolve()}
-                disabled={!resolutionNote || isSubmitting}
-                className="px-4 py-2 rounded-xl font-semibold bg-teal-600 hover:bg-teal-500 text-white shadow-sm transition cursor-pointer disabled:opacity-60"
-              >
-                {isSubmitting ? 'Recording...' : 'Record in Audit Log'}
-              </button>
-            </div>
           </div>
         </div>
+
+        {/* Metric Badges */}
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          {criticalCount > 0 && (
+            <div className="px-3 py-1.5 rounded-xl bg-red-500/15 border border-red-500/30 text-xs font-bold text-red-700 dark:text-red-300">
+              {criticalCount} Critical
+            </div>
+          )}
+          <div className="px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-xs font-bold text-amber-800 dark:text-amber-300">
+            {unreviewedCount} Unreviewed
+          </div>
+          <div className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+            {resolvedCount} Resolved
+          </div>
+        </div>
+      </div>
+
+      {/* Filter Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+        {/* Status Filter Tabs */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-semibold text-slate-400 px-2 flex items-center gap-1">
+            <Filter className="w-3 h-3" /> Status:
+          </span>
+          {[
+            { key: 'ALL', label: `All (${conflicts.length})` },
+            { key: 'UNREVIEWED', label: `Unreviewed (${unreviewedCount})` },
+            { key: 'REVIEWED', label: 'In Review' },
+            { key: 'RESOLVED', label: `Resolved (${resolvedCount})` },
+            { key: 'DISMISSED', label: 'Dismissed' },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setStatusFilter(tab.key)}
+              className={`px-3 py-1 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                statusFilter === tab.key
+                  ? 'bg-teal-600 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Severity Filter */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-semibold text-slate-400">Severity:</span>
+          <select
+            value={severityFilter}
+            onChange={(e) => setSeverityFilter(e.target.value)}
+            className="px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 focus:outline-none cursor-pointer"
+          >
+            <option value="ALL">All Severities</option>
+            <option value="CRITICAL">Critical Only</option>
+            <option value="HIGH">High Priority</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="LOW">Low</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Conflict Cards List */}
+      <div className="space-y-3.5">
+        {filteredConflicts.length === 0 ? (
+          <div className="p-12 text-center rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
+            <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+            <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              No Conflicts Found in this View
+            </h4>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              All clinical records match demographic parameters, medication dosages, and laboratory reference guidelines.
+            </p>
+          </div>
+        ) : (
+          filteredConflicts.map((conf) => (
+            <ConflictCard
+              key={conf.id}
+              conflict={conf}
+              onCompare={(c) => setComparingConflict(c)}
+              onResolve={(c) => setResolvingConflict(c)}
+              onReopen={(id) => handleReopenAction(id)}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Side-by-Side Review Modal */}
+      {comparingConflict && (
+        <SideBySideReviewModal
+          isOpen={!!comparingConflict}
+          onClose={() => setComparingConflict(null)}
+          conflict={comparingConflict}
+          onOpenResolve={(c) => {
+            setComparingConflict(null);
+            setResolvingConflict(c);
+          }}
+        />
+      )}
+
+      {/* Resolution Action Modal */}
+      {resolvingConflict && (
+        <ConflictResolutionModal
+          isOpen={!!resolvingConflict}
+          onClose={() => setResolvingConflict(null)}
+          conflict={resolvingConflict}
+          onResolve={handleResolveAction}
+        />
       )}
     </div>
   );
