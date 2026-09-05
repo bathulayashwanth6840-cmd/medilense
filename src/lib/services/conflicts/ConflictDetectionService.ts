@@ -6,7 +6,9 @@ export interface DetectedConflict {
   id?: string;
   patientId: string;
   conflictType:
+    | 'MEDICATION_DOSAGE_DISCREPANCY'
     | 'MEDICATION_INCONSISTENCY'
+    | 'ALLERGY_MEDICATION_CONTRAINDICATION'
     | 'ALLERGY_DISCREPANCY'
     | 'LAB_VALUE_DIVERGENCE'
     | 'DEMOGRAPHIC_MISMATCH'
@@ -60,7 +62,7 @@ export class ConflictDetectionService {
         if (distinctDoses.length > 1) {
           conflicts.push({
             patientId: patient.id,
-            conflictType: 'MEDICATION_INCONSISTENCY',
+            conflictType: 'MEDICATION_DOSAGE_DISCREPANCY',
             entityType: 'MEDICATION',
             description: `Conflicting dosage documented for ${records[0].drugName}: ${distinctDoses.join(' vs ')}. Clinician verification required.`,
             status: 'CONFLICT',
@@ -85,7 +87,7 @@ export class ConflictDetectionService {
         ) {
           conflicts.push({
             patientId: patient.id,
-            conflictType: 'ALLERGY_DISCREPANCY',
+            conflictType: 'ALLERGY_MEDICATION_CONTRAINDICATION',
             entityType: 'ALLERGY_MEDICATION_CONTRAINDICATION',
             description: `Potential allergy discrepancy: Patient has documented sensitivity to '${a.allergen}' while '${m.drugName}' is active in records.`,
             status: 'CONFLICT',

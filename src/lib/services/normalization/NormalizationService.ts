@@ -109,17 +109,23 @@ export class NormalizationService {
       normalizedUnit = STANDARD_UNITS[unitKey] || normalizedUnit;
     }
 
+    const rawRange = lab.sourceReferenceRange ?? lab.referenceRange ?? null;
+
     // 3. Classify reference range deterministically
     const evaluated = ReferenceRangeClassifier.classifyLabResult({
       ...lab,
       testName: normalizedName,
       unit: normalizedUnit,
+      sourceReferenceRange: rawRange,
+      referenceRange: rawRange,
     });
 
     return {
       ...lab,
       testName: normalizedName,
       unit: normalizedUnit,
+      sourceReferenceRange: rawRange,
+      referenceRange: rawRange,
       numericValue: evaluated.numericValue,
       referenceLow: evaluated.referenceLow,
       referenceHigh: evaluated.referenceHigh,

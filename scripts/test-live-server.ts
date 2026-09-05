@@ -80,22 +80,37 @@ async function testLiveServer() {
 
       // 5. Query Document Details & Extractions
       await checkRoute(`/api/documents/${docId}`, 'GET');
+      await checkRoute(`/api/documents/${docId}/pages`, 'GET');
       const extractions = await checkRoute(`/api/documents/${docId}/extractions`, 'GET');
       console.log(`         Retrieved ${extractions?.data?.labResults?.length || 0} labs, ${extractions?.data?.medications?.length || 0} meds.`);
 
-      // 6. Query Provenance Chain & Conflicts
+      // 6. Query Provenance Chain & Conflicts & Audit
       await checkRoute(`/api/documents/${docId}/provenance`, 'GET');
       await checkRoute(`/api/documents/${docId}/conflicts`, 'GET');
       await checkRoute(`/api/documents/${docId}/audit`, 'GET');
 
-      // 7. Verify an Extracted Lab Entity
-      if (extractions?.data?.labResults?.length > 0) {
-        const labId = extractions.data.labResults[0].id;
-        await checkRoute(`/api/verification/${labId}/accept`, 'POST', {
+      // 7. Verification Queue & Action Endpoints
+      await checkRoute('/api/verification', 'GET');
+
+      if (extractions?.data?.labResults?.length >= 2) {
+        const lab1Id = extractions.data.labResults[0].id;
+        const lab2Id = extractions.data.labResults[1].id;
+
+        // Accept verification
+        await checkRoute(`/api/verification/${lab1Id}/accept`, 'POST', {
           patientId: createdPatientId,
           entityType: 'LAB_RESULT',
           verifiedBy: 'Dr. Sarah Jenkins, MD',
           notes: 'Clinician accepted during live integration test',
+        });
+
+        // Edit verification
+        await checkRoute(`/api/verification/${lab2Id}`, 'PATCH', {
+          patientId: createdPatientId,
+          entityType: 'LAB_RESULT',
+          editedValues: { measuredValue: '215', notes: 'Clinician corrected value' },
+          editedBy: 'Dr. Sarah Jenkins, MD',
+          reason: 'Manual adjustment of borderline lab value',
         });
       }
     }

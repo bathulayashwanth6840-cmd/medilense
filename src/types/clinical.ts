@@ -21,12 +21,15 @@ export type ReferenceInterpretation =
   | 'HIGH'
   | 'CRITICAL_LOW'
   | 'CRITICAL_HIGH'
-  | 'REFERENCE_UNAVAILABLE';
+  | 'REFERENCE_UNAVAILABLE'
+  | 'UNDETERMINED';
 
 export type ConflictType = 
   | 'DEMOGRAPHIC_MISMATCH'
   | 'MEDICATION_INCONSISTENCY'
+  | 'MEDICATION_DOSAGE_DISCREPANCY'
   | 'ALLERGY_DISCREPANCY'
+  | 'ALLERGY_MEDICATION_CONTRAINDICATION'
   | 'LAB_VALUE_DIVERGENCE'
   | 'DATE_ANOMALY'
   | 'DUPLICATE_DISCREPANCY';
@@ -98,6 +101,10 @@ export interface DocumentRecord {
   reportDate?: string | Date | null;
   processingStatus: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | string;
   rawExtractedText?: string | null;
+  extractedText?: string | null;
+  pageCount?: number;
+  extractionMethod?: 'NATIVE_PDF' | 'OCR' | 'HYBRID' | string;
+  confidenceScore?: number;
   uploadedAt: string | Date;
   labResultsCount?: number;
   medicationsCount?: number;

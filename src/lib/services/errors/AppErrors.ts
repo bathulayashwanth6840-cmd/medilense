@@ -86,6 +86,12 @@ export class NormalizationError extends MedLensError {
   }
 }
 
+export class ReferenceRangeParseError extends MedLensError {
+  constructor(message: string, meta: ErrorMetadata = {}) {
+    super('ERR_REFERENCE_RANGE_PARSE', message, { ...meta, stage: 'REFERENCE_RANGE_EVALUATION', retryable: false });
+  }
+}
+
 export class DatabaseError extends MedLensError {
   constructor(message: string, meta: ErrorMetadata = {}) {
     super('ERR_DATABASE', message, { ...meta, stage: 'PERSISTENCE', retryable: true });
@@ -97,3 +103,4 @@ export class AuthorizationError extends MedLensError {
     super('ERR_AUTHORIZATION', message, { ...meta, stage: 'SECURITY', retryable: false });
   }
 }
+
