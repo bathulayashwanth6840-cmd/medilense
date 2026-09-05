@@ -3,7 +3,8 @@
 import React from 'react';
 import { BookmarkCheck, FileText, Check, X } from 'lucide-react';
 import { ConditionRecord } from '@/types/clinical';
-import { getProvenanceBadgeProps, getVerificationBadgeProps, formatDate } from '@/lib/utils/formatters';
+import { getVerificationBadgeProps, formatDate } from '@/lib/utils/formatters';
+import { ProvenanceBadge } from '@/components/provenance/ProvenanceBadge';
 
 interface ConditionsListProps {
   conditions: ConditionRecord[];
@@ -39,7 +40,6 @@ export default function ConditionsList({
           </div>
         ) : (
           conditions.map((cond) => {
-            const prov = getProvenanceBadgeProps(cond.provenanceSource);
             const verif = getVerificationBadgeProps(cond.verificationStatus);
 
             return (
@@ -70,9 +70,19 @@ export default function ConditionsList({
                 </div>
 
                 <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${prov.bg}`}>
-                    {prov.label}
-                  </span>
+                  <ProvenanceBadge
+                    provenanceType={cond.provenanceSource}
+                    provenanceId={cond.provenanceId}
+                    sourceDocumentName="LabCorp_CBC_2026.pdf"
+                    pageNumber={cond.sourcePageNumber || 1}
+                    confidence={cond.confidenceScore || 0.98}
+                    sourceText={cond.sourceOriginalSnippet || `Condition: ${cond.conditionName} (${cond.clinicalStatus})`}
+                    entityName={`Condition: ${cond.conditionName}`}
+                    entityValue={cond.clinicalStatus}
+                    documentId={cond.documentId}
+                    history={cond.provenanceHistory}
+                    compact
+                  />
 
                   {cond.verificationStatus !== 'VERIFIED' && (
                     <button

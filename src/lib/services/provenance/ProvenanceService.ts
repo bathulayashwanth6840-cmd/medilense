@@ -1,5 +1,6 @@
 import { Provenance, ClinicalExtraction } from '../validation/schemas';
-import { BoundingBox } from '../ocr/OCRService';
+import { BoundingBox, ProvenanceRecord, ProvenanceType } from './ProvenanceTypes';
+import { provenanceEngine } from './ProvenanceEngine';
 
 export class ProvenanceService {
   /**
@@ -119,4 +120,16 @@ export class ProvenanceService {
       })),
     };
   }
+
+  // Delegate methods to ProvenanceEngine singleton
+  static async getProvenance(id: string): Promise<ProvenanceRecord | null> {
+    return provenanceEngine.getProvenance(id);
+  }
+
+  static async getProvenanceHistory(entityId: string): Promise<ProvenanceRecord[]> {
+    return provenanceEngine.getProvenanceHistory(entityId);
+  }
 }
+
+export * from './ProvenanceTypes';
+export * from './ProvenanceEngine';

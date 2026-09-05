@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import { Pill, Check, Edit3, X, AlertCircle, Plus, ShieldCheck } from 'lucide-react';
 import { MedicationRecord } from '@/types/clinical';
-import { getProvenanceBadgeProps, getVerificationBadgeProps } from '@/lib/utils/formatters';
+import { getVerificationBadgeProps } from '@/lib/utils/formatters';
+import { ProvenanceBadge } from '@/components/provenance/ProvenanceBadge';
 
 interface MedicationsListProps {
   medications: MedicationRecord[];
@@ -73,7 +74,6 @@ export default function MedicationsList({
           </div>
         ) : (
           medications.map((med) => {
-            const prov = getProvenanceBadgeProps(med.provenanceSource);
             const verif = getVerificationBadgeProps(med.verificationStatus);
 
             return (
@@ -100,9 +100,21 @@ export default function MedicationsList({
                 </div>
 
                 <div className="mt-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between text-[10px]">
-                  <span className={`px-1.5 py-0.5 rounded font-medium border ${prov.bg}`}>
-                    {prov.label}
-                  </span>
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <ProvenanceBadge
+                      provenanceType={med.provenanceSource}
+                      provenanceId={med.provenanceId}
+                      sourceDocumentName="LabCorp_CBC_2026.pdf"
+                      pageNumber={med.sourcePageNumber || 1}
+                      confidence={med.confidenceScore || 0.96}
+                      sourceText={med.sourceOriginalSnippet}
+                      entityName={med.drugName}
+                      entityValue={med.dosage}
+                      documentId={med.documentId}
+                      history={med.provenanceHistory}
+                      compact
+                    />
+                  </div>
 
                   <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                     {med.verificationStatus !== 'VERIFIED' && (

@@ -23,6 +23,8 @@ import {
   getVerificationBadgeProps 
 } from '@/lib/utils/formatters';
 
+import { ProvenanceBadge } from '@/components/provenance/ProvenanceBadge';
+
 interface LabResultsTableProps {
   labResults: LabResultRecord[];
   onVerify: (labId: string, action: 'ACCEPT' | 'EDIT' | 'REJECT', editedValues?: any, reason?: string) => Promise<void>;
@@ -220,9 +222,24 @@ export default function LabResultsTable({
                       {getStatusBadge(lab.interpretation)}
                     </td>
 
-                    {/* Source */}
-                    <td className="py-3.5 px-4 text-slate-600 dark:text-slate-400 font-medium">
-                      LabCorp CBC
+                    {/* Source Provenance */}
+                    <td className="py-3.5 px-4" onClick={(e) => e.stopPropagation()}>
+                      <ProvenanceBadge
+                        provenanceType={lab.provenanceSource}
+                        provenanceId={lab.provenanceId}
+                        sourceDocumentName="LabCorp_CBC_2026.pdf"
+                        pageNumber={lab.sourcePageNumber || 1}
+                        confidence={lab.confidenceScore || 0.984}
+                        sourceText={lab.sourceOriginalSnippet}
+                        entityName={lab.testName}
+                        entityValue={lab.measuredValue}
+                        entityUnit={lab.unit}
+                        referenceRangeText={lab.referenceRangeText}
+                        referenceStatus={lab.interpretation}
+                        documentId={lab.documentId}
+                        history={lab.provenanceHistory}
+                        compact
+                      />
                     </td>
 
                     {/* Quick Verification Actions */}

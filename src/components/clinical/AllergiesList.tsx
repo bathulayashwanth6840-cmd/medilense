@@ -3,7 +3,8 @@
 import React from 'react';
 import { AlertOctagon, Check, X, ShieldAlert } from 'lucide-react';
 import { AllergyRecord } from '@/types/clinical';
-import { getProvenanceBadgeProps, getVerificationBadgeProps } from '@/lib/utils/formatters';
+import { getVerificationBadgeProps } from '@/lib/utils/formatters';
+import { ProvenanceBadge } from '@/components/provenance/ProvenanceBadge';
 
 interface AllergiesListProps {
   allergies: AllergyRecord[];
@@ -39,7 +40,6 @@ export default function AllergiesList({
           </div>
         ) : (
           allergies.map((all) => {
-            const prov = getProvenanceBadgeProps(all.provenanceSource);
             const verif = getVerificationBadgeProps(all.verificationStatus);
             const isSevere = all.severity === 'SEVERE' || all.severity === 'LIFE_THREATENING';
 
@@ -76,9 +76,19 @@ export default function AllergiesList({
                 </div>
 
                 <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${prov.bg}`}>
-                    {prov.label}
-                  </span>
+                  <ProvenanceBadge
+                    provenanceType={all.provenanceSource}
+                    provenanceId={all.provenanceId}
+                    sourceDocumentName="LabCorp_CBC_2026.pdf"
+                    pageNumber={all.sourcePageNumber || 1}
+                    confidence={all.confidenceScore || 0.99}
+                    sourceText={all.sourceOriginalSnippet || `Allergy: ${all.allergen} (${all.severity || 'Moderate'})`}
+                    entityName={`Allergy: ${all.allergen}`}
+                    entityValue={all.reaction || all.severity}
+                    documentId={all.documentId}
+                    history={all.provenanceHistory}
+                    compact
+                  />
 
                   {all.verificationStatus !== 'VERIFIED' && (
                     <button

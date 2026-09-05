@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { PatientRecord, LabResultRecord, MedicationRecord } from '@/types/clinical';
 import { formatDate } from '@/lib/utils/formatters';
+import { ProvenanceBadge } from '@/components/provenance/ProvenanceBadge';
 
 interface PatientFriendlyViewProps {
   patient: PatientRecord;
@@ -198,7 +199,22 @@ export default function PatientFriendlyView({ patient }: PatientFriendlyViewProp
                 </div>
 
                 <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
-                  <span>Tested on {formatDate(lab.testDate)}</span>
+                  <ProvenanceBadge
+                    provenanceType={lab.provenanceSource}
+                    provenanceId={lab.provenanceId}
+                    sourceDocumentName="LabCorp_CBC_2026.pdf"
+                    pageNumber={lab.sourcePageNumber || 1}
+                    confidence={lab.confidenceScore || 0.984}
+                    sourceText={lab.sourceOriginalSnippet}
+                    entityName={lab.testName}
+                    entityValue={lab.measuredValue}
+                    entityUnit={lab.unit}
+                    referenceRangeText={lab.referenceRangeText}
+                    referenceStatus={lab.interpretation}
+                    documentId={lab.documentId}
+                    history={lab.provenanceHistory}
+                    compact
+                  />
                   <span>{lab.verificationStatus === 'VERIFIED' ? '✓ Verified' : 'Unreviewed'}</span>
                 </div>
               </div>
@@ -217,11 +233,26 @@ export default function PatientFriendlyView({ patient }: PatientFriendlyViewProp
           </h4>
           <div className="space-y-2">
             {meds.map((m) => (
-              <div key={m.id} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/60 text-xs">
-                <div className="font-bold text-slate-900 dark:text-slate-100">{m.drugName}</div>
-                <div className="text-slate-600 dark:text-slate-300 text-[11px] mt-0.5">
-                  Dosage: <strong>{m.dosage || 'Unspecified'}</strong> • How often: <strong>{m.frequency || 'As documented'}</strong>
+              <div key={m.id} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/60 text-xs flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-bold text-slate-900 dark:text-slate-100">{m.drugName}</div>
+                  <div className="text-slate-600 dark:text-slate-300 text-[11px] mt-0.5">
+                    Dosage: <strong>{m.dosage || 'Unspecified'}</strong> • How often: <strong>{m.frequency || 'As documented'}</strong>
+                  </div>
                 </div>
+                <ProvenanceBadge
+                  provenanceType={m.provenanceSource}
+                  provenanceId={m.provenanceId}
+                  sourceDocumentName="LabCorp_CBC_2026.pdf"
+                  pageNumber={m.sourcePageNumber || 1}
+                  confidence={m.confidenceScore || 0.96}
+                  sourceText={m.sourceOriginalSnippet}
+                  entityName={m.drugName}
+                  entityValue={m.dosage}
+                  documentId={m.documentId}
+                  history={m.provenanceHistory}
+                  compact
+                />
               </div>
             ))}
           </div>
@@ -235,16 +266,31 @@ export default function PatientFriendlyView({ patient }: PatientFriendlyViewProp
           </h4>
           <div className="space-y-2">
             {allergies.map((a) => (
-              <div key={a.id} className="p-3 rounded-xl bg-rose-50/40 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800/50 text-xs">
-                <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
-                  <span>{a.allergen}</span>
-                  <span className="text-[10px] font-semibold text-rose-700 dark:text-rose-300 uppercase">{a.severity}</span>
-                </div>
-                {a.reaction && (
-                  <div className="text-slate-600 dark:text-slate-300 text-[11px] mt-0.5">
-                    Reaction noted: {a.reaction}
+              <div key={a.id} className="p-3 rounded-xl bg-rose-50/40 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800/50 text-xs flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <span>{a.allergen}</span>
+                    <span className="text-[10px] font-semibold text-rose-700 dark:text-rose-300 uppercase">{a.severity}</span>
                   </div>
-                )}
+                  {a.reaction && (
+                    <div className="text-slate-600 dark:text-slate-300 text-[11px] mt-0.5">
+                      Reaction noted: {a.reaction}
+                    </div>
+                  )}
+                </div>
+                <ProvenanceBadge
+                  provenanceType={a.provenanceSource}
+                  provenanceId={a.provenanceId}
+                  sourceDocumentName="LabCorp_CBC_2026.pdf"
+                  pageNumber={a.sourcePageNumber || 1}
+                  confidence={a.confidenceScore || 0.99}
+                  sourceText={a.sourceOriginalSnippet}
+                  entityName={`Allergy: ${a.allergen}`}
+                  entityValue={a.reaction || a.severity}
+                  documentId={a.documentId}
+                  history={a.provenanceHistory}
+                  compact
+                />
               </div>
             ))}
           </div>

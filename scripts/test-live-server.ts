@@ -89,6 +89,27 @@ async function testLiveServer() {
       await checkRoute(`/api/documents/${docId}/conflicts`, 'GET');
       await checkRoute(`/api/documents/${docId}/audit`, 'GET');
 
+      // 6b. Provenance System Specific Endpoints
+      console.log('\n  --- Testing Provenance System Endpoints ---');
+      await checkRoute(`/api/documents/${docId}/source/1`, 'GET');
+
+      if (extractions?.data?.labResults?.length > 0) {
+        const testLab = extractions.data.labResults[0];
+        const provRes = await checkRoute(`/api/records/${testLab.id}/provenance`, 'GET');
+        await checkRoute(`/api/records/${testLab.id}/provenance/history`, 'GET');
+
+        if (provRes?.data?.id || provRes?.data?.provenanceId) {
+          const pId = provRes.data.id || provRes.data.provenanceId;
+          await checkRoute(`/api/provenance/${pId}`, 'GET');
+        }
+      }
+
+      // Test Eleanor Vance demo entity provenance
+      await checkRoute('/api/provenance/prov-lab-1-v1', 'GET');
+      await checkRoute('/api/records/lab-1/provenance', 'GET');
+      await checkRoute('/api/records/lab-1/provenance/history', 'GET');
+      await checkRoute('/api/documents/doc-cbc-01/source/1', 'GET');
+
       // 7. Verification Queue & Action Endpoints
       await checkRoute('/api/verification', 'GET');
 
@@ -112,6 +133,13 @@ async function testLiveServer() {
           editedBy: 'Dr. Sarah Jenkins, MD',
           reason: 'Manual adjustment of borderline lab value',
         });
+
+        // Check that verification added immutable history events
+        const updatedHistory = await checkRoute(`/api/records/${lab2Id}/provenance/history`, 'GET');
+        const hLen = updatedHistory?.history?.length || updatedHistory?.data?.length || 0;
+        if (hLen > 1) {
+          console.log(`         Verified provenance history appended immutable version (History Length: ${hLen}).`);
+        }
       }
     }
   }

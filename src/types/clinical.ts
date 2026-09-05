@@ -127,10 +127,12 @@ export interface LabResultRecord {
   testDate?: string | Date | null;
   
   // Provenance & Verification
+  provenanceId?: string | null;
   provenanceSource: ProvenanceSource;
   sourcePageNumber?: number | null;
   sourceOriginalSnippet?: string | null;
   confidenceScore?: number | null;
+  provenanceHistory?: any[];
   verificationStatus: VerificationStatus;
   verifiedBy?: string | null;
   verifiedAt?: string | Date | null;
@@ -153,10 +155,12 @@ export interface MedicationRecord {
   endDate?: string | Date | null;
   prescribingDoctor?: string | null;
   
+  provenanceId?: string | null;
   provenanceSource: ProvenanceSource;
   sourcePageNumber?: number | null;
   sourceOriginalSnippet?: string | null;
   confidenceScore?: number | null;
+  provenanceHistory?: any[];
   verificationStatus: VerificationStatus;
   verifiedBy?: string | null;
   verifiedAt?: string | Date | null;
@@ -174,10 +178,12 @@ export interface AllergyRecord {
   reaction?: string | null;
   severity: 'MILD' | 'MODERATE' | 'SEVERE' | 'LIFE_THREATENING' | 'UNKNOWN' | string;
   
+  provenanceId?: string | null;
   provenanceSource: ProvenanceSource;
   sourcePageNumber?: number | null;
   sourceOriginalSnippet?: string | null;
   confidenceScore?: number | null;
+  provenanceHistory?: any[];
   verificationStatus: VerificationStatus;
   verifiedBy?: string | null;
   verifiedAt?: string | Date | null;
@@ -196,10 +202,12 @@ export interface ConditionRecord {
   clinicalStatus: 'ACTIVE' | 'RESOLVED' | 'INACTIVE' | 'RECURRENT' | string;
   diagnosedDate?: string | Date | null;
   
+  provenanceId?: string | null;
   provenanceSource: ProvenanceSource;
   sourcePageNumber?: number | null;
   sourceOriginalSnippet?: string | null;
   confidenceScore?: number | null;
+  provenanceHistory?: any[];
   verificationStatus: VerificationStatus;
   verifiedBy?: string | null;
   verifiedAt?: string | Date | null;
@@ -217,10 +225,12 @@ export interface ClinicalObservationRecord {
   content: string;
   observationDate?: string | Date | null;
   
+  provenanceId?: string | null;
   provenanceSource: ProvenanceSource;
   sourcePageNumber?: number | null;
   sourceOriginalSnippet?: string | null;
   confidenceScore?: number | null;
+  provenanceHistory?: any[];
   verificationStatus: VerificationStatus;
   verifiedBy?: string | null;
   verifiedAt?: string | Date | null;
@@ -237,6 +247,13 @@ export interface ClinicalSummaryRecord {
   notableChangesJson?: string | null;
   missingInformationJson?: string | null;
   guardrailValidation: string;
+  provenanceId?: string | null;
+  modelUsed?: string | null;
+  provider?: string | null;
+  provenanceSource?: ProvenanceSource;
+  inputRecordIds?: string[];
+  disclaimer?: string | null;
+  provenanceHistory?: any[];
   generatedAt: string | Date;
 }
 

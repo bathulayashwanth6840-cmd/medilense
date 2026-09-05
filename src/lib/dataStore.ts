@@ -32,9 +32,53 @@ class MedLensStore {
   summaries: Map<string, ClinicalSummaryRecord> = new Map();
   conflicts: Map<string, ConflictRecord> = new Map();
   auditLogs: Map<string, AuditLogRecord> = new Map();
+  provenanceRecords: Map<string, any> = new Map();
+  entityProvenanceHistory: Map<string, string[]> = new Map();
 
   constructor() {
     this.seedInitialData();
+  }
+
+  // --- PROVENANCE ---
+  async addProvenance(record: any): Promise<any> {
+    const pId = record.provenanceId || record.id;
+    this.provenanceRecords.set(record.id, record);
+    this.provenanceRecords.set(pId, record);
+
+    const history = this.entityProvenanceHistory.get(record.entityId) || [];
+    if (!history.includes(record.id)) {
+      history.push(record.id);
+      this.entityProvenanceHistory.set(record.entityId, history);
+    }
+    return record;
+  }
+
+  async getProvenanceById(id: string): Promise<any | null> {
+    return this.provenanceRecords.get(id) || null;
+  }
+
+  getProvenanceHistorySync(entityId: string): any[] {
+    const ids = this.entityProvenanceHistory.get(entityId) || [];
+    const list: any[] = [];
+    for (const id of ids) {
+      const rec = this.provenanceRecords.get(id);
+      if (rec && !list.some(r => r.id === rec.id)) list.push(rec);
+    }
+    for (const rec of this.provenanceRecords.values()) {
+      if (rec.entityId === entityId && !list.some(r => r.id === rec.id)) {
+        list.push(rec);
+      }
+    }
+    return list.sort((a, b) => (a.version || 1) - (b.version || 1));
+  }
+
+  async getProvenanceHistory(entityId: string): Promise<any[]> {
+    return this.getProvenanceHistorySync(entityId);
+  }
+
+  async getLatestProvenanceForEntity(entityId: string): Promise<any | null> {
+    const history = await this.getProvenanceHistory(entityId);
+    return history.length > 0 ? history[history.length - 1] : null;
   }
 
   // --- PATIENTS ---
@@ -48,15 +92,24 @@ class MedLensStore {
     const p = this.patients.get(id);
     if (!p) return null;
 
+    const enrich = (entity: any) => {
+      const hist = this.getProvenanceHistorySync(entity.id);
+      return {
+        ...entity,
+        provenanceHistory: hist,
+        provenanceId: entity.provenanceId || (hist.length > 0 ? hist[hist.length - 1].id : `prov_${entity.id}`),
+      };
+    };
+
     return {
       ...p,
       documents: Array.from(this.documents.values()).filter(d => d.patientId === id),
-      labResults: Array.from(this.labResults.values()).filter(l => l.patientId === id),
-      medications: Array.from(this.medications.values()).filter(m => m.patientId === id),
-      allergies: Array.from(this.allergies.values()).filter(a => a.patientId === id),
-      conditions: Array.from(this.conditions.values()).filter(c => c.patientId === id),
-      observations: Array.from(this.observations.values()).filter(o => o.patientId === id),
-      summaries: Array.from(this.summaries.values()).filter(s => s.patientId === id),
+      labResults: Array.from(this.labResults.values()).filter(l => l.patientId === id).map(enrich),
+      medications: Array.from(this.medications.values()).filter(m => m.patientId === id).map(enrich),
+      allergies: Array.from(this.allergies.values()).filter(a => a.patientId === id).map(enrich),
+      conditions: Array.from(this.conditions.values()).filter(c => c.patientId === id).map(enrich),
+      observations: Array.from(this.observations.values()).filter(o => o.patientId === id).map(enrich),
+      summaries: Array.from(this.summaries.values()).filter(s => s.patientId === id).map(enrich),
       conflicts: Array.from(this.conflicts.values()).filter(c => c.patientId === id),
       auditLogs: Array.from(this.auditLogs.values()).filter(a => a.patientId === id).sort((a, b) => 
         new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -127,6 +180,7 @@ class MedLensStore {
   async addLabResult(data: Partial<LabResultRecord>): Promise<LabResultRecord> {
     const id = data.id || uuidv4();
     const parsedRange = evaluateReferenceRange(data.measuredValue || '', data.referenceRangeText);
+    const provId = data.provenanceId || `prov_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
 
     const lab: LabResultRecord = {
       id,
@@ -142,6 +196,7 @@ class MedLensStore {
       refRangeHigh: parsedRange.refRangeHigh,
       interpretation: parsedRange.interpretation,
       testDate: data.testDate || new Date(),
+      provenanceId: provId,
       provenanceSource: data.provenanceSource || 'DOCUMENT_EXTRACTED',
       sourcePageNumber: data.sourcePageNumber || 1,
       sourceOriginalSnippet: data.sourceOriginalSnippet || null,
@@ -155,6 +210,25 @@ class MedLensStore {
     };
 
     this.labResults.set(id, lab);
+
+    // Initial Provenance
+    await this.addProvenance({
+      id: provId,
+      provenanceId: provId,
+      entityId: id,
+      entityType: 'LAB_RESULT',
+      provenanceType: lab.provenanceSource,
+      version: 1,
+      documentId: lab.documentId,
+      pageNumber: lab.sourcePageNumber,
+      sourceText: lab.sourceOriginalSnippet || `${lab.testName}: ${lab.measuredValue} ${lab.unit || ''}`,
+      confidence: lab.confidenceScore,
+      extractionMethod: 'NATIVE_PDF',
+      userId: lab.provenanceSource === 'USER_PROVIDED' ? 'User' : undefined,
+      timestamp: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
     await this.logAudit(lab.patientId, 'LAB_RESULT', id, 'AI_EXTRACTED', null, lab, 'AI_ENGINE', `Extracted test: ${lab.testName}`);
     return lab;
   }
@@ -162,6 +236,8 @@ class MedLensStore {
   // --- MEDICATIONS ---
   async addMedication(data: Partial<MedicationRecord>): Promise<MedicationRecord> {
     const id = data.id || uuidv4();
+    const provId = data.provenanceId || `prov_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+
     const med: MedicationRecord = {
       id,
       patientId: data.patientId!,
@@ -174,6 +250,7 @@ class MedLensStore {
       startDate: data.startDate || null,
       endDate: data.endDate || null,
       prescribingDoctor: data.prescribingDoctor || null,
+      provenanceId: provId,
       provenanceSource: data.provenanceSource || 'DOCUMENT_EXTRACTED',
       sourcePageNumber: data.sourcePageNumber || 1,
       sourceOriginalSnippet: data.sourceOriginalSnippet || null,
@@ -187,6 +264,24 @@ class MedLensStore {
     };
 
     this.medications.set(id, med);
+
+    await this.addProvenance({
+      id: provId,
+      provenanceId: provId,
+      entityId: id,
+      entityType: 'MEDICATION',
+      provenanceType: med.provenanceSource,
+      version: 1,
+      documentId: med.documentId,
+      pageNumber: med.sourcePageNumber,
+      sourceText: med.sourceOriginalSnippet || `${med.drugName} ${med.dosage || ''}`,
+      confidence: med.confidenceScore,
+      extractionMethod: 'NATIVE_PDF',
+      userId: med.provenanceSource === 'USER_PROVIDED' ? 'User' : undefined,
+      timestamp: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
     await this.logAudit(med.patientId, 'MEDICATION', id, 'AI_EXTRACTED', null, med, 'AI_ENGINE', `Extracted medication: ${med.drugName}`);
     return med;
   }
@@ -194,6 +289,8 @@ class MedLensStore {
   // --- ALLERGIES ---
   async addAllergy(data: Partial<AllergyRecord>): Promise<AllergyRecord> {
     const id = data.id || uuidv4();
+    const provId = data.provenanceId || `prov_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+
     const all: AllergyRecord = {
       id,
       patientId: data.patientId!,
@@ -201,6 +298,7 @@ class MedLensStore {
       allergen: data.allergen || 'Unknown Allergen',
       reaction: data.reaction || null,
       severity: data.severity || 'UNKNOWN',
+      provenanceId: provId,
       provenanceSource: data.provenanceSource || 'DOCUMENT_EXTRACTED',
       sourcePageNumber: data.sourcePageNumber || 1,
       sourceOriginalSnippet: data.sourceOriginalSnippet || null,
@@ -214,6 +312,24 @@ class MedLensStore {
     };
 
     this.allergies.set(id, all);
+
+    await this.addProvenance({
+      id: provId,
+      provenanceId: provId,
+      entityId: id,
+      entityType: 'ALLERGY',
+      provenanceType: all.provenanceSource,
+      version: 1,
+      documentId: all.documentId,
+      pageNumber: all.sourcePageNumber,
+      sourceText: all.sourceOriginalSnippet || all.allergen,
+      confidence: all.confidenceScore,
+      extractionMethod: 'NATIVE_PDF',
+      userId: all.provenanceSource === 'USER_PROVIDED' ? 'User' : undefined,
+      timestamp: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
     await this.logAudit(all.patientId, 'ALLERGY', id, 'AI_EXTRACTED', null, all, 'AI_ENGINE', `Extracted allergy: ${all.allergen}`);
     return all;
   }
@@ -221,6 +337,8 @@ class MedLensStore {
   // --- CONDITIONS ---
   async addCondition(data: Partial<ConditionRecord>): Promise<ConditionRecord> {
     const id = data.id || uuidv4();
+    const provId = data.provenanceId || `prov_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+
     const cond: ConditionRecord = {
       id,
       patientId: data.patientId!,
@@ -229,6 +347,7 @@ class MedLensStore {
       icd10Code: data.icd10Code || null,
       clinicalStatus: data.clinicalStatus || 'ACTIVE',
       diagnosedDate: data.diagnosedDate || null,
+      provenanceId: provId,
       provenanceSource: data.provenanceSource || 'DOCUMENT_EXTRACTED',
       sourcePageNumber: data.sourcePageNumber || 1,
       sourceOriginalSnippet: data.sourceOriginalSnippet || null,
@@ -242,6 +361,24 @@ class MedLensStore {
     };
 
     this.conditions.set(id, cond);
+
+    await this.addProvenance({
+      id: provId,
+      provenanceId: provId,
+      entityId: id,
+      entityType: 'CONDITION',
+      provenanceType: cond.provenanceSource,
+      version: 1,
+      documentId: cond.documentId,
+      pageNumber: cond.sourcePageNumber,
+      sourceText: cond.sourceOriginalSnippet || cond.conditionName,
+      confidence: cond.confidenceScore,
+      extractionMethod: 'NATIVE_PDF',
+      userId: cond.provenanceSource === 'USER_PROVIDED' ? 'User' : undefined,
+      timestamp: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
     await this.logAudit(cond.patientId, 'CONDITION', id, 'AI_EXTRACTED', null, cond, 'AI_ENGINE', `Extracted condition: ${cond.conditionName}`);
     return cond;
   }
@@ -249,6 +386,8 @@ class MedLensStore {
   // --- OBSERVATIONS ---
   async addObservation(data: Partial<ClinicalObservationRecord>): Promise<ClinicalObservationRecord> {
     const id = data.id || uuidv4();
+    const provId = data.provenanceId || `prov_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+
     const obs: ClinicalObservationRecord = {
       id,
       patientId: data.patientId!,
@@ -256,6 +395,7 @@ class MedLensStore {
       category: data.category || 'CLINICIAN_NOTE',
       content: data.content || '',
       observationDate: data.observationDate || new Date(),
+      provenanceId: provId,
       provenanceSource: data.provenanceSource || 'DOCUMENT_EXTRACTED',
       sourcePageNumber: data.sourcePageNumber || 1,
       sourceOriginalSnippet: data.sourceOriginalSnippet || null,
@@ -269,6 +409,24 @@ class MedLensStore {
     };
 
     this.observations.set(id, obs);
+
+    await this.addProvenance({
+      id: provId,
+      provenanceId: provId,
+      entityId: id,
+      entityType: 'CLINICAL_OBSERVATION',
+      provenanceType: obs.provenanceSource,
+      version: 1,
+      documentId: obs.documentId,
+      pageNumber: obs.sourcePageNumber,
+      sourceText: obs.sourceOriginalSnippet || obs.content,
+      confidence: obs.confidenceScore,
+      extractionMethod: 'NATIVE_PDF',
+      userId: obs.provenanceSource === 'USER_PROVIDED' ? 'User' : undefined,
+      timestamp: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
     return obs;
   }
 
@@ -328,21 +486,39 @@ class MedLensStore {
     if (!existing) return null;
 
     const previousCopy = { ...existing };
+    const history = await this.getProvenanceHistory(entityId);
+    const newVersion = history.length + 1;
 
     if (action === 'ACCEPT') {
       existing.verificationStatus = 'VERIFIED';
       existing.verifiedAt = new Date();
-      existing.verifiedBy = 'Clinical Reviewer';
+      existing.verifiedBy = 'Dr. Sarah Jenkins, MD';
+
+      const vProvId = `prov_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+      await this.addProvenance({
+        id: vProvId,
+        provenanceId: vProvId,
+        entityId,
+        entityType,
+        provenanceType: 'HUMAN_VERIFIED',
+        version: newVersion,
+        userId: existing.verifiedBy,
+        action: 'VERIFY',
+        verifiedRecordId: entityId,
+        timestamp: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+      existing.provenanceId = vProvId;
     } else if (action === 'REJECT') {
       existing.verificationStatus = 'REJECTED';
       existing.verifiedAt = new Date();
-      existing.verifiedBy = 'Clinical Reviewer';
+      existing.verifiedBy = 'Dr. Sarah Jenkins, MD';
       existing.verificationNotes = reason || 'Rejected by clinical reviewer';
     } else if (action === 'EDIT' && editedValues) {
       existing.verificationStatus = 'EDITED';
       existing.provenanceSource = 'USER_EDITED';
       existing.verifiedAt = new Date();
-      existing.verifiedBy = 'Clinical Reviewer';
+      existing.verifiedBy = 'Dr. Sarah Jenkins, MD';
       existing.verificationNotes = reason || 'Modified during human verification';
 
       Object.assign(existing, editedValues);
@@ -355,6 +531,24 @@ class MedLensStore {
         existing.refRangeHigh = reEval.refRangeHigh;
         existing.interpretation = reEval.interpretation;
       }
+
+      const eProvId = `prov_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+      await this.addProvenance({
+        id: eProvId,
+        provenanceId: eProvId,
+        entityId,
+        entityType,
+        provenanceType: 'USER_EDITED',
+        version: newVersion,
+        previousValue: previousCopy,
+        newValue: editedValues,
+        userId: existing.verifiedBy,
+        action: 'EDIT',
+        reason: reason || 'Modified during human verification',
+        timestamp: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+      existing.provenanceId = eProvId;
     }
 
     targetMap.set(entityId, existing);
@@ -737,6 +931,128 @@ class MedLensStore {
     for (const log of initialLogs) {
       this.auditLogs.set(log.id, log);
     }
+
+    // Seed Complete First-Class Provenance Chains
+    const seedProvenance: any[] = [
+      // Lab 1 (Hemoglobin) - Version 1: DOCUMENT_EXTRACTED
+      {
+        id: 'prov-lab-1-v1',
+        provenanceId: 'prov-lab-1-v1',
+        entityId: 'lab-1',
+        entityType: 'LAB_RESULT',
+        provenanceType: 'DOCUMENT_EXTRACTED',
+        version: 1,
+        documentId: doc1Id,
+        documentName: 'LabCorp_CBC_2026.pdf',
+        pageNumber: 1,
+        sourceText: 'Hemoglobin: 11.2 g/dL\nRef: 13.0 – 17.0 g/dL',
+        confidence: 0.984,
+        extractionMethod: 'OCR',
+        boundingBox: { x: 50, y: 120, width: 480, height: 45 },
+        timestamp: '2026-09-05T11:15:02Z',
+        createdAt: '2026-09-05T11:15:02Z',
+      },
+      // Lab 2 (WBC Count) - Version 1: DOCUMENT_EXTRACTED
+      {
+        id: 'prov-lab-2-v1',
+        provenanceId: 'prov-lab-2-v1',
+        entityId: 'lab-2',
+        entityType: 'LAB_RESULT',
+        provenanceType: 'DOCUMENT_EXTRACTED',
+        version: 1,
+        documentId: doc1Id,
+        documentName: 'LabCorp_CBC_2026.pdf',
+        pageNumber: 1,
+        sourceText: 'WBC Count: 6.8 k/uL\nRef: 4.5 – 11.0 k/uL',
+        confidence: 0.99,
+        extractionMethod: 'OCR',
+        boundingBox: { x: 50, y: 170, width: 480, height: 45 },
+        timestamp: '2026-09-05T11:15:02Z',
+        createdAt: '2026-09-05T11:15:02Z',
+      },
+      // Lab 2 (WBC Count) - Version 2: HUMAN_VERIFIED
+      {
+        id: 'prov-lab-2-v2',
+        provenanceId: 'prov-lab-2-v2',
+        entityId: 'lab-2',
+        entityType: 'LAB_RESULT',
+        provenanceType: 'HUMAN_VERIFIED',
+        version: 2,
+        userId: 'Dr. Sarah Jenkins, MD',
+        action: 'VERIFY',
+        verifiedRecordId: 'lab-2',
+        timestamp: '2026-09-05T11:20:00Z',
+        createdAt: '2026-09-05T11:20:00Z',
+      },
+      // Lab 3 (Ferritin) - Version 1: DOCUMENT_EXTRACTED
+      {
+        id: 'prov-lab-3-v1',
+        provenanceId: 'prov-lab-3-v1',
+        entityId: 'lab-3',
+        entityType: 'LAB_RESULT',
+        provenanceType: 'DOCUMENT_EXTRACTED',
+        version: 1,
+        documentId: doc1Id,
+        documentName: 'LabCorp_CBC_2026.pdf',
+        pageNumber: 1,
+        sourceText: 'Ferritin: 45 ng/mL\n(Ref: Unavailable)',
+        confidence: 0.97,
+        extractionMethod: 'OCR',
+        boundingBox: { x: 50, y: 220, width: 480, height: 45 },
+        timestamp: '2026-09-05T11:15:02Z',
+        createdAt: '2026-09-05T11:15:02Z',
+      },
+      // Lab 3 (Ferritin) - Version 2: HUMAN_VERIFIED
+      {
+        id: 'prov-lab-3-v2',
+        provenanceId: 'prov-lab-3-v2',
+        entityId: 'lab-3',
+        entityType: 'LAB_RESULT',
+        provenanceType: 'HUMAN_VERIFIED',
+        version: 2,
+        userId: 'Dr. Sarah Jenkins, MD',
+        action: 'VERIFY',
+        verifiedRecordId: 'lab-3',
+        timestamp: '2026-09-05T11:20:00Z',
+        createdAt: '2026-09-05T11:20:00Z',
+      },
+      // Med 1 (Metformin 1000mg) - Version 1: DOCUMENT_EXTRACTED
+      {
+        id: 'prov-med-1-v1',
+        provenanceId: 'prov-med-1-v1',
+        entityId: 'med-1',
+        entityType: 'MEDICATION',
+        provenanceType: 'DOCUMENT_EXTRACTED',
+        version: 1,
+        documentId: doc1Id,
+        documentName: 'LabCorp_CBC_2026.pdf',
+        pageNumber: 1,
+        sourceText: 'Rx: Metformin 1000 mg PO twice daily with meals',
+        confidence: 0.96,
+        extractionMethod: 'OCR',
+        boundingBox: { x: 50, y: 350, width: 500, height: 50 },
+        timestamp: '2026-09-05T11:15:00Z',
+        createdAt: '2026-09-05T11:15:00Z',
+      },
+      // Med 2 (Metformin 500mg) - Version 1: USER_PROVIDED
+      {
+        id: 'prov-med-2-v1',
+        provenanceId: 'prov-med-2-v1',
+        entityId: 'med-2',
+        entityType: 'MEDICATION',
+        provenanceType: 'USER_PROVIDED',
+        version: 1,
+        userId: 'Eleanor Vance (Patient)',
+        field: 'Current Medications',
+        source: 'USER',
+        timestamp: '2026-09-02T08:30:00Z',
+        createdAt: '2026-09-02T08:30:00Z',
+      },
+    ];
+
+    for (const p of seedProvenance) {
+      this.addProvenance(p);
+    }
   }
 }
 
@@ -744,6 +1060,12 @@ class MedLensStore {
 export function getStore(): MedLensStore {
   if (!global.__medlens_store) {
     global.__medlens_store = new MedLensStore();
+  }
+  if (!global.__medlens_store.provenanceRecords) {
+    global.__medlens_store.provenanceRecords = new Map();
+  }
+  if (!global.__medlens_store.entityProvenanceHistory) {
+    global.__medlens_store.entityProvenanceHistory = new Map();
   }
   return global.__medlens_store;
 }
