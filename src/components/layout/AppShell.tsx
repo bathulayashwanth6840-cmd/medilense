@@ -321,18 +321,22 @@ export default function AppShell({ children, breadcrumbs }: AppShellProps) {
               </button>
             </div>
 
-            {/* Clinician Profile Strip */}
-            <div className="flex items-center gap-2.5 p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
-              <div className="w-8 h-8 rounded-lg bg-teal-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
-                SJ
-              </div>
-              <div className="truncate flex-1">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block truncate">
-                  Dr. Sarah Jenkins
-                </span>
-                <span className="text-[10px] text-slate-400 block font-mono">
-                  Clinician • Verified
-                </span>
+            {/* Clinician Profile & Role Switcher */}
+            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-teal-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
+                    SJ
+                  </div>
+                  <div className="truncate">
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block truncate">
+                      Dr. Sarah Jenkins
+                    </span>
+                    <span className="text-[9px] text-teal-600 dark:text-teal-400 font-mono block">
+                      CLINICIAN • Active Auth
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

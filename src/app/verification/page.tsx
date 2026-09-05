@@ -161,6 +161,34 @@ export default function VerificationQueuePage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {counts.pending > 0 && (
+            <button
+              onClick={async () => {
+                setIsRefreshing(true);
+                try {
+                  const patientIds = Array.from(new Set(tasks.map(t => t.patientId)));
+                  for (const pId of patientIds) {
+                    await fetch('/api/verification/bulk-accept', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ patientId: pId, minConfidence: 0.90 }),
+                    });
+                  }
+                  await fetchQueue();
+                } catch (err) {
+                  console.error('Bulk verification failed:', err);
+                } finally {
+                  setIsRefreshing(false);
+                }
+              }}
+              disabled={isRefreshing}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Bulk Verify High-Confidence (90%+)</span>
+            </button>
+          )}
+
           <button
             onClick={fetchQueue}
             disabled={isRefreshing}

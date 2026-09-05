@@ -1,6 +1,6 @@
-// MedLens Data Store & Persistence Manager
-// Combines Prisma ORM with resilient local JSON/in-memory relational store to ensure 100% uptime and zero crashes on any platform.
-
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import {
   PatientRecord,
@@ -19,6 +19,13 @@ import {
   VerificationRequirementReason,
 } from '@/types/clinical';
 import { evaluateReferenceRange } from './ai/parsers';
+
+function getDbFilePath(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join(os.tmpdir(), 'medlens_db.json');
+  }
+  return path.resolve(process.cwd(), 'storage', 'medlens_db.json');
+}
 
 // Global memory state for instantaneous responsiveness and dev runtime continuity
 declare global {
@@ -43,7 +50,64 @@ class MedLensStore {
   verificationActions: Map<string, VerificationAction> = new Map();
 
   constructor() {
-    // Clean initialized in-memory database - no dummy data
+    this.loadFromDisk();
+  }
+
+  saveToDisk() {
+    try {
+      const dbPath = getDbFilePath();
+      const dir = path.dirname(dbPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const data = {
+        patients: Array.from(this.patients.entries()),
+        documents: Array.from(this.documents.entries()),
+        labResults: Array.from(this.labResults.entries()),
+        medications: Array.from(this.medications.entries()),
+        allergies: Array.from(this.allergies.entries()),
+        conditions: Array.from(this.conditions.entries()),
+        observations: Array.from(this.observations.entries()),
+        summaries: Array.from(this.summaries.entries()),
+        conflicts: Array.from(this.conflicts.entries()),
+        conflictResolutions: Array.from(this.conflictResolutions.entries()),
+        auditLogs: Array.from(this.auditLogs.entries()),
+        provenanceRecords: Array.from(this.provenanceRecords.entries()),
+        entityProvenanceHistory: Array.from(this.entityProvenanceHistory.entries()),
+        verificationTasks: Array.from(this.verificationTasks.entries()),
+        verificationActions: Array.from(this.verificationActions.entries()),
+      };
+      fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {
+      console.warn('DataStore disk save failed:', err);
+    }
+  }
+
+  loadFromDisk() {
+    try {
+      const dbPath = getDbFilePath();
+      if (!fs.existsSync(dbPath)) return;
+      const raw = fs.readFileSync(dbPath, 'utf-8');
+      if (!raw || !raw.trim()) return;
+      const data = JSON.parse(raw);
+      if (data.patients) this.patients = new Map(data.patients);
+      if (data.documents) this.documents = new Map(data.documents);
+      if (data.labResults) this.labResults = new Map(data.labResults);
+      if (data.medications) this.medications = new Map(data.medications);
+      if (data.allergies) this.allergies = new Map(data.allergies);
+      if (data.conditions) this.conditions = new Map(data.conditions);
+      if (data.observations) this.observations = new Map(data.observations);
+      if (data.summaries) this.summaries = new Map(data.summaries);
+      if (data.conflicts) this.conflicts = new Map(data.conflicts);
+      if (data.conflictResolutions) this.conflictResolutions = new Map(data.conflictResolutions);
+      if (data.auditLogs) this.auditLogs = new Map(data.auditLogs);
+      if (data.provenanceRecords) this.provenanceRecords = new Map(data.provenanceRecords);
+      if (data.entityProvenanceHistory) this.entityProvenanceHistory = new Map(data.entityProvenanceHistory);
+      if (data.verificationTasks) this.verificationTasks = new Map(data.verificationTasks);
+      if (data.verificationActions) this.verificationActions = new Map(data.verificationActions);
+    } catch (err) {
+      console.warn('DataStore disk load failed:', err);
+    }
   }
 
   // --- PROVENANCE ---
@@ -885,6 +949,7 @@ class MedLensStore {
     };
 
     this.auditLogs.set(id, log);
+    this.saveToDisk();
     return log;
   }
 
