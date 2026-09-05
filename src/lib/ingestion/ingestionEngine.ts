@@ -14,6 +14,103 @@ import {
 import { DocumentRecord, PatientRecord } from '@/types/clinical';
 import { z } from 'zod';
 
+/**
+ * Extracts text content from a PDF file buffer using pdf-parse v2.
+ * Returns the extracted text or null if extraction fails.
+ */
+async function extractTextFromPDF(buffer: Buffer): Promise<string | null> {
+  try {
+    const { PDFParse } = await import('pdf-parse');
+    // pdf-parse v2 marks some methods as private in types but they are accessible at runtime
+    const parser: any = new PDFParse({ data: new Uint8Array(buffer) });
+    await parser.load();
+    
+    // getText() returns all text from the document
+    const fullText: string = await parser.getText();
+    
+    if (fullText && fullText.trim().length > 0) {
+      return fullText;
+    }
+    
+    // Fallback: try page by page extraction
+    const pageTexts: string[] = [];
+    const numPages = parser.doc?.numPages || 0;
+    for (let i = 1; i <= numPages; i++) {
+      try {
+        const pageText = await parser.getPageText(i);
+        if (pageText && pageText.trim()) {
+          pageTexts.push(pageText);
+        }
+      } catch {
+        // Skip unreadable pages
+      }
+    }
+    
+    const combinedText = pageTexts.join('\n\n');
+    if (combinedText.trim().length > 0) {
+      return combinedText;
+    }
+    return null;
+  } catch (err: any) {
+    console.warn('PDF text extraction failed:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Extracts readable text from a file buffer based on its MIME type.
+ * Supports PDF parsing, plain text, and image files (with metadata fallback).
+ */
+async function extractTextFromBuffer(
+  buffer: Buffer,
+  mimeType: string,
+  originalFileName: string,
+): Promise<string> {
+  // 1. For text-based files, read directly as UTF-8
+  if (
+    mimeType.includes('text') ||
+    originalFileName.toLowerCase().endsWith('.txt')
+  ) {
+    return buffer.toString('utf-8');
+  }
+
+  // 2. For PDF files, use pdf-parse library for real extraction
+  if (
+    mimeType === 'application/pdf' ||
+    mimeType === 'application/octet-stream' ||
+    originalFileName.toLowerCase().endsWith('.pdf')
+  ) {
+    const pdfText = await extractTextFromPDF(buffer);
+    if (pdfText && pdfText.trim().length > 10) {
+      return pdfText;
+    }
+    
+    // If pdf-parse returned nothing (scanned/image-only PDF), try raw UTF-8
+    // to catch hybrid PDFs that embed some text
+    const rawUtf8 = buffer.toString('utf-8');
+    const alphaRatio = (rawUtf8.match(/[a-zA-Z0-9]/g) || []).length / Math.max(rawUtf8.length, 1);
+    if (alphaRatio > 0.3 && rawUtf8.length > 20) {
+      return rawUtf8;
+    }
+    
+    // Truly image-only PDF — return informational message (NO fake data)
+    return `[Scanned PDF Document: ${originalFileName}]\nThis PDF appears to contain scanned images only.\nOCR processing would be required to extract text from image-based pages.\nNo text content could be automatically extracted from this document.`;
+  }
+
+  // 3. For image files (scans), return metadata only (NO fabricated data)
+  if (mimeType.startsWith('image/')) {
+    return `[Scanned Medical Image: ${originalFileName}]\nImage-based document uploaded.\nOCR/image text recognition would be required to extract clinical data.\nPlease use the Direct Text Input method to manually enter the clinical information from this scan.`;
+  }
+
+  // 4. Last resort: try UTF-8 interpretation
+  const rawUtf8 = buffer.toString('utf-8');
+  if (rawUtf8.trim().length > 10) {
+    return rawUtf8;
+  }
+
+  return `[Unrecognized Document Format: ${originalFileName}]\nCould not extract text content from this file.\nPlease verify the file format or use Direct Text Input to enter the clinical data manually.`;
+}
+
 export type ProcessingStatus = z.infer<typeof ProcessingStatusEnum>;
 
 export interface IngestionResult {
@@ -86,23 +183,35 @@ export class MedLensIngestionEngine {
 
       // 4. STAGE: EXTRACTING - Multimodal text extraction & AI Parsing
       stagesCompleted.push('EXTRACTING');
-      let extractedText = '';
-      const utf8String = fileBuffer.toString('utf-8');
-      if (
-        mimeType.includes('text') || 
-        originalFileName.endsWith('.txt') ||
-        utf8String.includes('Hemoglobin') || 
-        utf8String.includes('Patient') || 
-        utf8String.includes('LabCorp') ||
-        utf8String.includes('CBC') ||
-        utf8String.includes('Rx:')
-      ) {
-        extractedText = utf8String;
-      } else {
-        // Fallback simulation for raw binary scans / PDFs without OCR stream
-        extractedText = `[Uploaded Document: ${storedFile.sanitizedFileName}]\nSHA-256 Hash: ${storedFile.fileHashSha256}\nSize: ${(storedFile.fileSizeBytes / 1024).toFixed(1)} KB\n\nPatient Name: ${patient.fullName} | MRN: ${patient.identifier}\n\nClinical Report Summary: Complete Blood Count & Metabolic Panel\nHemoglobin: 10.9 g/dL (Ref: 13.0 - 17.0 g/dL) [L]\nFerritin: 12 ng/mL (Ref: 20 - 200 ng/mL) [L]\nWBC: 7.1 k/uL (Ref: 4.5 - 11.0 k/uL)\nPlatelets: 235 k/uL (Ref: 150 - 450 k/uL)\n\nRx: Ferrous Sulfate 325 mg PO once daily\nRx: Atorvastatin 10 mg PO once daily at bedtime\nAllergy: Penicillin - Reaction: Severe Urticaria and bronchospasm`;
-      }
+      const extractedText = await extractTextFromBuffer(fileBuffer, mimeType, originalFileName);
       docRecord.rawExtractedText = extractedText;
+
+      // Extract and update patient metadata if document header contains patient info
+      if (extractedText && patient) {
+        const nameMatch = extractedText.match(/(?:patient(?:\s*name)?|pt(?:\s*name)?)\s*[:\s]+\s*([a-zA-Z\s,.'-]+?)(?:\r?\n|\||MRN|DOB|Date|$)/i);
+        const mrnMatch = extractedText.match(/(?:mrn|patient\s*id|acct\.?|id)\s*[:\s#]+\s*([a-zA-Z0-9\-]+)/i);
+        const dobMatch = extractedText.match(/(?:dob|date\s*of\s*birth|d\.o\.b\.?)\s*[:\s]+\s*([0-9/\-]+)/i);
+        
+        const updates: any = {};
+        if (nameMatch && nameMatch[1]) {
+          const nm = nameMatch[1].trim();
+          if (nm.length > 2 && nm.length < 60 && (patient.fullName.includes('New Patient') || patient.fullName.includes('Record') || patient.fullName.includes('.pdf') || patient.fullName.includes('.txt'))) {
+            updates.fullName = nm;
+          }
+        }
+        if (mrnMatch && mrnMatch[1]) {
+          const mrn = mrnMatch[1].trim();
+          if (mrn.length > 2 && mrn.length < 40) {
+            updates.identifier = mrn;
+          }
+        }
+        if (dobMatch && dobMatch[1]) {
+          updates.dateOfBirth = dobMatch[1].trim();
+        }
+        if (Object.keys(updates).length > 0) {
+          await store.updatePatient(patientId, updates);
+        }
+      }
 
       const extracted = await extractFromDocument(extractedText, storedFile.sanitizedFileName);
 

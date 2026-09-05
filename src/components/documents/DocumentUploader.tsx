@@ -38,81 +38,8 @@ const PROCESSING_STAGES = [
   { id: 'COMPLETED', label: 'Ingestion Finalized', desc: 'Integrated into structured patient record' },
 ];
 
-const SAMPLE_REPORTS = [
-  {
-    title: 'LabCorp Comprehensive CBC & Metabolic Panel',
-    type: 'LAB_REPORT',
-    fileName: 'LabCorp_CBC_Metabolic_Report.pdf',
-    text: `LabCorp Diagnostic Laboratories
-Patient Name: Eleanor Vance | MRN: ML-98214 | DOB: 04/14/1972
-Ordering Physician: Dr. Sarah Jenkins, MD
-Report Date: 2026-09-02
-
-Complete Blood Count (CBC):
-Hemoglobin: 10.9 g/dL (Ref: 13.0 - 17.0 g/dL) [L]
-Hematocrit: 33.1 % (Ref: 37.0 - 48.0 %) [L]
-WBC: 7.1 k/uL (Ref: 4.5 - 11.0 k/uL)
-Platelets: 235 k/uL (Ref: 150 - 450 k/uL)
-MCV: 78 fL (Ref: 80 - 100 fL) [L]
-
-Iron & Nutritional Markers:
-Ferritin: 12 ng/mL (Ref: 20 - 200 ng/mL) [L]
-Total Iron: 42 ug/dL (Ref: 50 - 170 ug/dL) [L]
-Vitamin D, 25-OH: 22 ng/mL (Ref: 30 - 100 ng/mL) [L]
-Vitamin B12: 480 pg/mL (Ref: 200 - 900 pg/mL)
-
-Lipid & Chemistry Panel:
-Total Cholesterol: 218 mg/dL (Ref: < 200 mg/dL) [H]
-Triglycerides: 142 mg/dL (Ref: < 150 mg/dL)
-HDL Cholesterol: 52 mg/dL (Ref: > 40 mg/dL)
-LDL Cholesterol: 138 mg/dL (Ref: < 100 mg/dL) [H]
-Glucose, Fasting: 94 mg/dL (Ref: 70 - 99 mg/dL)
-C-Reactive Protein (CRP): 3.2 mg/L (Ref: None specified)`,
-  },
-  {
-    title: 'Mercy Health Outpatient Prescription Note',
-    type: 'PRESCRIPTION',
-    fileName: 'Mercy_Health_Rx_Consultation.pdf',
-    text: `Mercy Health Outpatient Clinic
-Consultation & Medication Reconciliation
-Patient: Eleanor Vance | MRN: ML-98214 | DOB: 04/14/1972
-
-Clinical Assessment:
-Patient evaluated for ongoing microcytic state and mild hypovitaminosis D.
-
-Prescriptions:
-Rx: Ferrous Sulfate 325 mg PO once daily with citrus juice
-Rx: Ergocalciferol (Vitamin D2) 50,000 IU PO weekly for 8 weeks
-Rx: Atorvastatin 10 mg PO once daily at bedtime
-Rx: Metformin 500 mg PO twice daily with meals
-
-Documented Allergies:
-Allergy: Penicillin - Reaction: Severe Urticaria and bronchospasm
-Allergy: Sulfa Drugs - Reaction: Skin eruption / Erythema`,
-  },
-  {
-    title: 'Cardiology Discharge Summary Note',
-    type: 'DISCHARGE_SUMMARY',
-    fileName: 'Discharge_Summary_Cardiology.pdf',
-    text: `University Medical Center - Department of Cardiology
-Discharge Summary
-Patient: Eleanor Vance | MRN: ML-98214 | Date: 2026-08-15
-
-Admission Diagnosis: Essential Hypertension & Palpitations
-Discharge Assessment: Blood pressure stabilized on oral antihypertensives.
-
-Hospital Course Lab Values:
-Serum Potassium: 4.1 mEq/L (Ref: 3.5 - 5.0 mEq/L)
-Serum Creatinine: 0.9 mg/dL (Ref: 0.5 - 1.1 mg/dL)
-eGFR: 84 mL/min/1.73m2 (Ref: > 60 mL/min/1.73m2)
-Troponin I: < 0.01 ng/mL (Ref: < 0.04 ng/mL)
-
-Discharge Medications:
-Rx: Lisinopril 10 mg PO once daily in morning
-Rx: Hydrochlorothiazide 12.5 mg PO once daily
-Rx: Atorvastatin 10 mg PO once daily at bedtime`,
-  },
-];
+// No hardcoded sample reports - all data comes from actual uploaded documents
+const SAMPLE_REPORTS: { title: string; type: string; fileName: string; text: string }[] = [];
 
 export default function DocumentUploader({
   patientId,
@@ -222,11 +149,32 @@ export default function DocumentUploader({
     setUploadProgress(10);
     setCurrentStatus('Uploading & computing SHA-256 checksum...');
 
-    const activePatientId = targetPatientId || patientId;
-    if (!activePatientId) {
-      setErrorMessage('Please select or register a patient record before uploading documents.');
-      setIsUploading(false);
-      return;
+    let activePatientId = targetPatientId || patientId;
+    if (!activePatientId || activePatientId === 'AUTO_CREATE') {
+      try {
+        const createRes = await fetch('/api/patients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fullName: file ? file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ') : 'New Patient Record',
+            identifier: `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
+            sex: 'UNKNOWN',
+          }),
+        });
+        const createJson = await createRes.json();
+        if (createJson.success && createJson.data?.id) {
+          activePatientId = createJson.data.id;
+          setTargetPatientId(activePatientId);
+        } else {
+          setErrorMessage('Failed to create patient record for upload: ' + (createJson.error || 'Unknown error'));
+          setIsUploading(false);
+          return;
+        }
+      } catch (err: any) {
+        setErrorMessage('Failed to create patient record for upload: ' + (err.message || 'Network error'));
+        setIsUploading(false);
+        return;
+      }
     }
 
     try {
@@ -396,6 +344,7 @@ export default function DocumentUploader({
                 onChange={(e) => setTargetPatientId(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500"
               >
+                <option value="AUTO_CREATE">+ Auto-create New Patient Record from Document</option>
                 {patients.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.fullName} ({p.identifier})
@@ -403,8 +352,9 @@ export default function DocumentUploader({
                 ))}
               </select>
             ) : (
-              <div className="text-[11px] text-amber-700 dark:text-amber-400">
-                No patients in registry yet. Please complete a patient intake first.
+              <div className="flex items-center gap-2 p-2.5 rounded-lg bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-300">
+                <Sparkles className="w-4 h-4 text-teal-600 shrink-0" />
+                <span className="font-semibold text-xs">A new Patient Record will be auto-created for this document upload.</span>
               </div>
             )}
           </div>

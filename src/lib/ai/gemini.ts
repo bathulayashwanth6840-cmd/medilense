@@ -161,6 +161,7 @@ function fallbackClinicalParser(text: string, fileName: string): ExtractedData {
 
   const lines = text.split(/\r?\n/);
   let pageNum = 1;
+  const extractedTestNames = new Set<string>(); // deduplicate lab results
 
   // Patient metadata patterns
   let extractedName: string | null = null;
@@ -179,51 +180,86 @@ function fallbackClinicalParser(text: string, fileName: string): ExtractedData {
     }
 
     // Check Patient Info
-    if (/patient(?:\s*name)?[:\s]+([a-zA-Z\s]+)/i.test(line)) {
-      extractedName = line.match(/patient(?:\s*name)?[:\s]+([a-zA-Z\s]+)/i)?.[1]?.trim() || null;
+    if (/patient(?:\s*name)?[:\s]+([a-zA-Z\s,.'-]+)/i.test(line) && !extractedName) {
+      const nm = line.match(/patient(?:\s*name)?[:\s]+([a-zA-Z\s,.'-]+)/i)?.[1]?.trim();
+      if (nm && nm.length > 2 && nm.length < 60) extractedName = nm;
     }
-    if (/dob|date\s*of\s*birth[:\s]+([0-9/-]+)/i.test(line)) {
-      extractedDob = line.match(/dob|date\s*of\s*birth[:\s]+([0-9/-]+)/i)?.[1]?.trim() || null;
+    if (/(?:dob|date\s*of\s*birth|d\.o\.b\.?)[:\s]+([0-9/\-]+)/i.test(line)) {
+      extractedDob = line.match(/(?:dob|date\s*of\s*birth|d\.o\.b\.?)[:\s]+([0-9/\-]+)/i)?.[1]?.trim() || null;
     }
-    if (/gender|sex[:\s]+(male|female|other)/i.test(line)) {
-      extractedSex = line.match(/gender|sex[:\s]+(male|female|other)/i)?.[1]?.toUpperCase() || null;
+    if (/(?:gender|sex)[:\s]+(male|female|other|m|f)/i.test(line)) {
+      const rawSex = line.match(/(?:gender|sex)[:\s]+(male|female|other|m|f)/i)?.[1]?.toUpperCase() || null;
+      extractedSex = rawSex === 'M' ? 'MALE' : rawSex === 'F' ? 'FEMALE' : rawSex;
     }
-    if (/mrn|patient\s*id[:\s]+([a-zA-Z0-9-]+)/i.test(line)) {
-      extractedIdentifier = line.match(/mrn|patient\s*id[:\s]+([a-zA-Z0-9-]+)/i)?.[1]?.trim() || null;
+    if (/(?:mrn|medical\s*record\s*(?:number|no\.?|#)?|patient\s*id|acct\.?(?:\s*no\.?)?|id)[:\s#]+([a-zA-Z0-9\-]+)/i.test(line)) {
+      extractedIdentifier = line.match(/(?:mrn|medical\s*record|patient\s*id|acct\.?|id)[:\s#]+([a-zA-Z0-9\-]+)/i)?.[1]?.trim() || null;
     }
-    if (/report\s*date|collection\s*date|date[:\s]+([0-9/-]{8,10})/i.test(line)) {
-      reportDate = line.match(/report\s*date|collection\s*date|date[:\s]+([0-9/-]{8,10})/i)?.[1]?.trim() || null;
+    if (/(?:report\s*date|collection\s*date|date\s*(?:of\s*)?(?:report|service|collection))[:\s]+([0-9/\-]{6,10})/i.test(line)) {
+      reportDate = line.match(/(?:report\s*date|collection\s*date|date\s*(?:of\s*)?(?:report|service|collection))[:\s]+([0-9/\-]{6,10})/i)?.[1]?.trim() || null;
     }
 
-    // Check Medications (e.g. "Rx: Ferrous Sulfate 325 mg PO once daily" or "Metformin 500mg twice daily")
-    if (/(?:rx|medication|taking|prescribed)[:\s]+([a-zA-Z0-9\s]+?)\s+([0-9]+\s*(?:mg|mcg|ml|units|mEq|IU))\s*([a-zA-Z\s]+)?/i.test(line)) {
-      const medMatch = line.match(/(?:rx|medication|taking|prescribed)[:\s]+([a-zA-Z0-9\s]+?)\s+([0-9]+\s*(?:mg|mcg|ml|units|mEq|IU))\s*([a-zA-Z\s]+)?/i);
-      if (medMatch && medMatch[1]) {
-        medications.push({
-          drugName: medMatch[1].trim(),
-          dosage: medMatch[2].trim(),
-          frequency: medMatch[3]?.trim() || 'Once daily',
-          route: 'Oral',
-          status: 'ACTIVE',
-          sourcePageNumber: pageNum,
-          sourceOriginalSnippet: line,
-          confidenceScore: 0.96,
-        });
+    // === MEDICATIONS ===
+    // Rx: format, Prescribed:, Medication:, or standalone drug patterns
+    const medPatterns = [
+      /(?:rx|medication|taking|prescribed|drug)[:\s]+([a-zA-Z][a-zA-Z0-9\s()]+?)\s+([0-9]+(?:,[0-9]+)?(?:\.[0-9]+)?\s*(?:mg|mcg|ml|units?|mEq|IU|g))\s*(.*)?/i,
+      /(?:rx|medication|prescribed)[:\s]+([a-zA-Z][a-zA-Z0-9\s()-]+?)(?:\s+(?:tab|cap|capsule|tablet)s?)?\s+([0-9]+(?:\.[0-9]+)?\s*(?:mg|mcg|ml|units?|mEq|IU|g))\s*(.*)?/i,
+    ];
+    for (const medPat of medPatterns) {
+      if (medPat.test(line)) {
+        const medMatch = line.match(medPat);
+        if (medMatch && medMatch[1]) {
+          const drugName = medMatch[1].replace(/\(.*?\)/g, '').trim();
+          if (drugName.length > 2 && drugName.length < 50) {
+            // Deduplicate
+            const key = drugName.toLowerCase();
+            if (!medications.find(m => m.drugName.toLowerCase() === key)) {
+              // Parse frequency from remainder
+              const remainder = medMatch[3]?.trim() || '';
+              let frequency = 'Once daily';
+              let route = 'Oral';
+              if (/twice|bid|b\.i\.d/i.test(remainder)) frequency = 'Twice daily';
+              else if (/three|tid|t\.i\.d/i.test(remainder)) frequency = 'Three times daily';
+              else if (/four|qid|q\.i\.d/i.test(remainder)) frequency = 'Four times daily';
+              else if (/weekly/i.test(remainder)) frequency = 'Weekly';
+              else if (/once daily|qd|q\.d|daily/i.test(remainder)) frequency = 'Once daily';
+              else if (/as needed|prn|p\.r\.n/i.test(remainder)) frequency = 'As needed';
+              else if (remainder.length > 2) frequency = remainder.substring(0, 40);
+
+              if (/po|oral|by mouth/i.test(line)) route = 'Oral';
+              else if (/iv|intravenous/i.test(line)) route = 'Intravenous';
+              else if (/im|intramuscular/i.test(line)) route = 'Intramuscular';
+              else if (/topical/i.test(line)) route = 'Topical';
+              else if (/subq|subcutaneous|sc/i.test(line)) route = 'Subcutaneous';
+
+              medications.push({
+                drugName,
+                dosage: medMatch[2].trim(),
+                frequency,
+                route,
+                status: 'ACTIVE',
+                sourcePageNumber: pageNum,
+                sourceOriginalSnippet: line,
+                confidenceScore: 0.96,
+              });
+            }
+            break;
+          }
+        }
       }
     }
 
-    // Check Allergies (e.g. "Allergy: Penicillin - Reaction: Severe Urticaria", "Allergy: Aspirin (Wheezing)")
-    if (/allergy|allergies/i.test(line)) {
-      const cleanLine = line.replace(/^.*?(?:allergy|allergies)[:\s]*/i, '').trim();
-      if (cleanLine && cleanLine.toLowerCase() !== 'none' && cleanLine.toLowerCase() !== 'nkda') {
-        const match = cleanLine.match(/^([^(\-:\n]+)(?:[-(:\s]+(?:reaction[:\s]*)?([^)\n]+)\)?)?/i);
+    // === ALLERGIES ===
+    if (/(?:allergy|allergies|allergic\s+to|known\s+allerg)/i.test(line)) {
+      const cleanLine = line.replace(/^.*?(?:allergy|allergies|allergic\s+to|known\s+allerg(?:ies|y)?)[:\s]*/i, '').trim();
+      if (cleanLine && cleanLine.length > 1 && !/^(?:none|nkda|nka|no\s+known|denied)$/i.test(cleanLine)) {
+        const match = cleanLine.match(/^([^(\-:\n,]+)(?:[\-(:\s]+(?:reaction[:\s]*)?([^)\n]+)\)?)?/i);
         const allergen = match && match[1] ? match[1].trim() : cleanLine;
         const reaction = match && match[2] ? match[2].replace(/[()]/g, '').trim() : 'Documented Reaction';
-        if (allergen) {
+        if (allergen && allergen.length > 1 && !allergies.find(a => a.allergen.toLowerCase() === allergen.toLowerCase())) {
           allergies.push({
             allergen,
             reaction,
-            severity: /anaphylaxis|severe|shock|urticaria|wheezing/i.test(line) ? 'SEVERE' : 'MODERATE',
+            severity: /anaphylaxis|severe|shock|urticaria|wheezing|angioedema|bronchospasm/i.test(line) ? 'SEVERE' : 'MODERATE',
             sourcePageNumber: pageNum,
             sourceOriginalSnippet: line,
             confidenceScore: 0.94,
@@ -232,57 +268,148 @@ function fallbackClinicalParser(text: string, fileName: string): ExtractedData {
       }
     }
 
-    // Check Conditions / Diagnoses documented in record
-    if (/(?:assessment|history of|known condition|dx|diagnosis)[:\s]+([a-zA-Z0-9\s,-]+)/i.test(line)) {
-      const condMatch = line.match(/(?:assessment|history of|known condition|dx|diagnosis)[:\s]+([a-zA-Z0-9\s,-]+)/i);
+    // === CONDITIONS / DIAGNOSES ===
+    if (/(?:assessment|impression|history\s+of|known\s+condition|dx|diagnosis|diagnos(?:es|ed)|problem\s*list|admission\s*diagnos|discharge\s*(?:assessment|diagnos))[:\s]+([a-zA-Z0-9\s,&-]+)/i.test(line)) {
+      const condMatch = line.match(/(?:assessment|impression|history\s+of|known\s+condition|dx|diagnosis|diagnos(?:es|ed)|problem\s*list|admission\s*diagnos|discharge\s*(?:assessment|diagnos))[:\s]+([a-zA-Z0-9\s,&-]+)/i);
       if (condMatch && condMatch[1]) {
-        conditions.push({
-          conditionName: condMatch[1].trim(),
-          clinicalStatus: 'ACTIVE',
-          sourcePageNumber: pageNum,
-          sourceOriginalSnippet: line,
-          confidenceScore: 0.92,
-        });
+        const condName = condMatch[1].trim();
+        if (condName.length > 3 && condName.length < 80 && !conditions.find(c => c.conditionName.toLowerCase() === condName.toLowerCase())) {
+          conditions.push({
+            conditionName: condName,
+            clinicalStatus: 'ACTIVE',
+            sourcePageNumber: pageNum,
+            sourceOriginalSnippet: line,
+            confidenceScore: 0.92,
+          });
+        }
       }
     }
 
-    // Check Lab Result Lines
+    // === LAB RESULTS ===
     const knownTests = [
-      'Hemoglobin', 'Hematocrit', 'HbA1c', 'WBC', 'Platelets', 'MCV',
+      'Hemoglobin', 'Hematocrit', 'HbA1c', 'WBC', 'Platelets', 'MCV', 'MCH', 'MCHC',
+      'RBC', 'RDW', 'MPV', 'Neutrophils', 'Lymphocytes', 'Monocytes', 'Eosinophils', 'Basophils',
       'Creatinine', 'eGFR', 'Glucose', 'Total Cholesterol', 'Triglycerides',
-      'HDL', 'LDL', 'Sodium', 'Potassium', 'Ferritin', 'TSH', 'AST', 'ALT',
-      'BUN', 'Bilirubin', 'Magnesium', 'Vitamin D', 'Vitamin B12', 'CRP', 'Troponin'
+      'HDL', 'LDL', 'VLDL', 'Sodium', 'Potassium', 'Chloride', 'CO2', 'Bicarbonate',
+      'Calcium', 'Phosphorus', 'Magnesium', 'Uric Acid',
+      'Ferritin', 'Iron', 'Total Iron', 'TIBC', 'Transferrin',
+      'TSH', 'T3', 'T4', 'Free T4', 'Free T3',
+      'AST', 'ALT', 'ALP', 'GGT', 'Albumin', 'Total Protein', 'Globulin',
+      'BUN', 'Bilirubin', 'Direct Bilirubin', 'Indirect Bilirubin',
+      'Vitamin D', 'Vitamin B12', 'Folate', 'Folic Acid',
+      'CRP', 'ESR', 'Troponin', 'Troponin I', 'Troponin T', 'BNP', 'ProBNP',
+      'INR', 'PT', 'PTT', 'aPTT', 'Fibrinogen', 'D-Dimer',
+      'PSA', 'AFP', 'CEA', 'CA-125', 'CA 19-9',
+      'Hemoglobin A1c', 'Fasting Glucose', 'Random Glucose',
+      'Serum Potassium', 'Serum Creatinine', 'Serum Sodium', 'Serum Calcium',
+      'Blood Glucose', 'Blood Urea Nitrogen',
+      'Total Bilirubin', 'Alkaline Phosphatase',
+      'Prothrombin Time', 'Partial Thromboplastin Time',
+      'C-Reactive Protein', 'Erythrocyte Sedimentation Rate',
     ];
 
+    let labMatched = false;
     for (const test of knownTests) {
+      const escapedTest = test.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
       if (
-        new RegExp(`\\b${test}\\b`, 'i').test(line) &&
+        new RegExp(`\\b${escapedTest}\\b`, 'i').test(line) &&
         !line.toLowerCase().startsWith('rx:') &&
-        !line.toLowerCase().startsWith('allergy:')
+        !/^(?:allergy|allergies)/i.test(line) &&
+        !/medication|prescribed|taking/i.test(line)
       ) {
-        // Match value following test name or in line
-        const valRegex = new RegExp(`${test}[:\\s\\t]+([<>]?\\s*[0-9]+(?:\\.[0-9]+)?)\\s*([a-zA-Z/%μuLdLmg\\^23-]+)?`, 'i');
-        const valMatch = line.match(valRegex) || line.match(/([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%μuLdLmg\\^23-]+)?/);
+        // Match value following test name
+        const valRegex = new RegExp(`${escapedTest}[,:\\s\\t]+(<?>?\\s*[0-9]+(?:,?[0-9]+)?(?:\\.[0-9]+)?)\\s*([a-zA-Z/%μuLdLmgn\\\\^23\\-]+)?`, 'i');
+        const valMatch = line.match(valRegex);
 
         if (valMatch && valMatch[1]) {
+          const measuredValue = valMatch[1].replace(/,/g, '').trim();
+          
+          // Skip if we already have this test
+          const testKey = test.toLowerCase();
+          if (extractedTestNames.has(testKey)) break;
+          extractedTestNames.add(testKey);
+
           // Extract reference range if present
-          const rangeMatch = line.match(/(?:Ref(?:erence)?(?:\s*Range)?[:\s]*)?([<>]?\s*[0-9]+(?:\.[0-9]+)?\s*(?:-|–|to)\s*[0-9]+(?:\.[0-9]+)?|[<>=]\s*[0-9]+(?:\.[0-9]+)?)/i);
-          let rawRange = rangeMatch ? rangeMatch[1] || rangeMatch[0] : null;
-          if (rawRange && rawRange.trim() === valMatch[1]?.trim()) {
+          const rangeMatch = line.match(/(?:Ref(?:erence)?(?:\s*Range)?[:\s]*)?(<?[0-9]+(?:\.[0-9]+)?\s*(?:-|–|—|to)\s*[0-9]+(?:\.[0-9]+)?(?:\s*[a-zA-Z/%]+)?|[<>=]+\s*[0-9]+(?:\.[0-9]+)?)/i);
+          let rawRange = rangeMatch ? (rangeMatch[1] || rangeMatch[0]).trim() : null;
+          // Don't confuse the measured value with a range
+          if (rawRange && rawRange.replace(/\s/g, '') === measuredValue.replace(/\s/g, '')) {
             rawRange = null;
+          }
+          // Clean up "Ref:" prefix from range text
+          if (rawRange) {
+            rawRange = rawRange.replace(/^(?:Ref(?:erence)?(?:\s*Range)?[:\s]*)/i, '').trim();
+          }
+
+          // Default units for common tests
+          let unit = valMatch[2]?.trim() || '';
+          if (!unit) {
+            const unitDefaults: Record<string, string> = {
+              'hemoglobin': 'g/dL', 'hematocrit': '%', 'hba1c': '%', 'hemoglobin a1c': '%',
+              'glucose': 'mg/dL', 'fasting glucose': 'mg/dL', 'random glucose': 'mg/dL', 'blood glucose': 'mg/dL',
+              'creatinine': 'mg/dL', 'serum creatinine': 'mg/dL',
+              'bun': 'mg/dL', 'blood urea nitrogen': 'mg/dL',
+              'sodium': 'mEq/L', 'serum sodium': 'mEq/L',
+              'potassium': 'mEq/L', 'serum potassium': 'mEq/L',
+              'chloride': 'mEq/L', 'calcium': 'mg/dL', 'serum calcium': 'mg/dL',
+              'total cholesterol': 'mg/dL', 'triglycerides': 'mg/dL',
+              'hdl': 'mg/dL', 'ldl': 'mg/dL',
+              'ferritin': 'ng/mL', 'iron': 'ug/dL', 'total iron': 'ug/dL',
+              'tsh': 'mIU/L',
+              'vitamin d': 'ng/mL', 'vitamin b12': 'pg/mL',
+              'crp': 'mg/L', 'c-reactive protein': 'mg/L',
+              'ast': 'U/L', 'alt': 'U/L', 'alp': 'U/L', 'alkaline phosphatase': 'U/L',
+              'albumin': 'g/dL', 'total protein': 'g/dL',
+              'bilirubin': 'mg/dL', 'total bilirubin': 'mg/dL',
+              'wbc': 'k/uL', 'platelets': 'k/uL', 'rbc': 'M/uL',
+              'mcv': 'fL', 'mch': 'pg', 'mchc': 'g/dL',
+              'troponin': 'ng/mL', 'troponin i': 'ng/mL', 'troponin t': 'ng/mL',
+              'egfr': 'mL/min/1.73m2',
+            };
+            unit = unitDefaults[testKey] || '';
           }
 
           labResults.push({
             testName: test,
             testCategory: 'Routine Chemistry & Hematology',
-            measuredValue: valMatch[1].trim(),
-            unit: valMatch[2]?.trim() || (test === 'Hemoglobin' ? 'g/dL' : test === 'Glucose' ? 'mg/dL' : test === 'HbA1c' ? '%' : ''),
+            measuredValue,
+            unit,
             referenceRangeText: rawRange,
             sourcePageNumber: pageNum,
             sourceOriginalSnippet: line,
             confidenceScore: 0.97,
           });
+          labMatched = true;
           break;
+        }
+      }
+    }
+
+    // Generic lab line catch-all: matches patterns like "TestName: 12.3 mg/dL (Ref: 10.0 - 15.0)"
+    // Only if no specific test was matched above
+    if (!labMatched && /^[A-Z][a-zA-Z\s,()-]{2,40}[:\s]+<?[0-9]+(?:\.[0-9]+)?/.test(line) && !/^(?:rx|allergy|allergies|medication|patient|date|report|mrn|dob|gender|sex|page|assessment|diagnosis|history)/i.test(line)) {
+      const genericMatch = line.match(/^([A-Z][a-zA-Z\s,()-]{2,40}?)[:\s]+(<?[0-9]+(?:,[0-9]+)?(?:\.[0-9]+)?)\s*([a-zA-Z/%μuLdLmgn^23-]+)?/);
+      if (genericMatch && genericMatch[1] && genericMatch[2]) {
+        const testName = genericMatch[1].trim();
+        const testKey = testName.toLowerCase();
+        if (!extractedTestNames.has(testKey) && testName.length > 2 && testName.length < 40) {
+          extractedTestNames.add(testKey);
+          
+          const rangeMatch = line.match(/(?:Ref(?:erence)?(?:\s*Range)?[:\s]*)?(<?[0-9]+(?:\.[0-9]+)?\s*(?:-|–|—|to)\s*[0-9]+(?:\.[0-9]+)?|[<>=]+\s*[0-9]+(?:\.[0-9]+)?)/i);
+          let rawRange = rangeMatch ? (rangeMatch[1] || rangeMatch[0]).trim() : null;
+          if (rawRange) rawRange = rawRange.replace(/^(?:Ref(?:erence)?(?:\s*Range)?[:\s]*)/i, '').trim();
+          if (rawRange && rawRange === genericMatch[2].trim()) rawRange = null;
+
+          labResults.push({
+            testName,
+            testCategory: 'Extracted Laboratory Value',
+            measuredValue: genericMatch[2].replace(/,/g, '').trim(),
+            unit: genericMatch[3]?.trim() || '',
+            referenceRangeText: rawRange,
+            sourcePageNumber: pageNum,
+            sourceOriginalSnippet: line,
+            confidenceScore: 0.85, // Lower confidence for generic matches
+          });
         }
       }
     }
