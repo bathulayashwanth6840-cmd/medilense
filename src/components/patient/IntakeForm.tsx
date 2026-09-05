@@ -33,18 +33,18 @@ export default function IntakeForm() {
   const [formData, setFormData] = useState<PatientIntakeFormData>({
     identifier: `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
     fullName: '',
-    dateOfBirth: '1982-04-18',
-    age: 44,
+    dateOfBirth: '',
+    age: 0,
     sex: 'FEMALE',
-    contactNumber: '+1 (555) 482-9012',
-    bloodType: 'A+',
-    emergencyContact: 'Mark Vance (Spouse) - +1 (555) 482-9015',
-    symptoms: 'Mild fatigue, exertional shortness of breath for 3 weeks, morning dizziness',
-    existingConditions: 'Essential Hypertension (diagnosed 2021), Mild Hypovitaminosis D',
-    allergies: 'Penicillin (Severe Hives & Wheezing), Sulfa Drugs (Maculopapular Rash)',
-    medications: 'Lisinopril 10mg PO once daily in morning, Atorvastatin 10mg PO at bedtime',
-    medicalHistory: 'Appendectomy (2014), Family history of early coronary artery disease (Maternal)',
-    additionalNotes: 'Baseline structured intake submitted via clinical web portal. Requested comprehensive CBC & metabolic panel review.',
+    contactNumber: '',
+    bloodType: 'O+',
+    emergencyContact: '',
+    symptoms: '',
+    existingConditions: '',
+    allergies: '',
+    medications: '',
+    medicalHistory: '',
+    additionalNotes: '',
   });
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -78,63 +78,6 @@ export default function IntakeForm() {
         return next;
       });
     }
-  };
-
-  const handlePrefillDemo = (scenario: 'CARDIAC' | 'DIABETIC' | 'ANEMIA') => {
-    if (scenario === 'CARDIAC') {
-      setFormData({
-        identifier: `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
-        fullName: 'Jonathan Miller',
-        dateOfBirth: '1968-11-23',
-        age: 57,
-        sex: 'MALE',
-        contactNumber: '+1 (555) 723-8841',
-        bloodType: 'O+',
-        emergencyContact: 'Sarah Miller (Wife) - +1 (555) 723-8840',
-        symptoms: 'Occasional palpitations and chest tightness during heavy exertion',
-        existingConditions: 'Hyperlipidemia, Mild Essential Hypertension',
-        allergies: 'Codeine (Nausea & Dizziness)',
-        medications: 'Atorvastatin 20mg daily, Lisinopril 10mg daily',
-        medicalHistory: 'Coronary stent placed in 2022, Non-smoker for 10 years',
-        additionalNotes: 'Routine cardiology follow-up intake.',
-      });
-    } else if (scenario === 'DIABETIC') {
-      setFormData({
-        identifier: `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
-        fullName: 'Maria Rodriguez',
-        dateOfBirth: '1975-08-14',
-        age: 51,
-        sex: 'FEMALE',
-        contactNumber: '+1 (555) 390-1122',
-        bloodType: 'B+',
-        emergencyContact: 'Carlos Rodriguez (Son) - +1 (555) 390-1125',
-        symptoms: 'Increased thirst and mild peripheral tingling in lower extremities',
-        existingConditions: 'Type 2 Diabetes Mellitus, Diabetic Neuropathy',
-        allergies: 'Sulfa Drugs (Erythematous rash)',
-        medications: 'Metformin 1000mg twice daily with meals, Glipizide 5mg daily',
-        medicalHistory: 'Gestational diabetes during 1999 pregnancy, Annual retinal scan normal',
-        additionalNotes: 'Endocrinology quarterly management intake.',
-      });
-    } else {
-      setFormData({
-        identifier: `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
-        fullName: 'Eleanor Vance',
-        dateOfBirth: '1972-04-14',
-        age: 54,
-        sex: 'FEMALE',
-        contactNumber: '+1 (555) 839-4401',
-        bloodType: 'A+',
-        emergencyContact: 'Mark Vance - +1 (555) 839-4402',
-        symptoms: 'Generalized fatigue, brittle nails, exertional dyspnea for 2 months',
-        existingConditions: 'Microcytic Anemia, Hypovitaminosis D, Essential Hypertension',
-        allergies: 'Penicillin (Severe Anaphylaxis/Urticaria), Sulfa (Maculopapular Rash)',
-        medications: 'Ferrous Sulfate 325mg PO daily, Ergocalciferol 50,000 IU weekly, Atorvastatin 10mg PO daily',
-        medicalHistory: 'Mild iron deficiency diagnosed in 2024, Cholecystectomy (2018)',
-        additionalNotes: 'Comprehensive baseline intake for MedLens Document Intelligence.',
-      });
-    }
-    setFieldErrors({});
-    setGeneralError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -211,34 +154,6 @@ export default function IntakeForm() {
             </p>
           </div>
         </div>
-
-        {/* Quick Demo Prefill Options */}
-        <div className="hidden sm:flex flex-col gap-1 shrink-0 text-right">
-          <span className="text-[10px] text-slate-400 font-semibold uppercase">Prefill Demo:</span>
-          <div className="flex gap-1.5">
-            <button
-              type="button"
-              onClick={() => handlePrefillDemo('ANEMIA')}
-              className="px-2 py-1 text-[10px] font-bold bg-white dark:bg-slate-800 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 rounded-lg hover:bg-teal-50 transition cursor-pointer"
-            >
-              Anemia Profile
-            </button>
-            <button
-              type="button"
-              onClick={() => handlePrefillDemo('CARDIAC')}
-              className="px-2 py-1 text-[10px] font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 transition cursor-pointer"
-            >
-              Cardiac Profile
-            </button>
-            <button
-              type="button"
-              onClick={() => handlePrefillDemo('DIABETIC')}
-              className="px-2 py-1 text-[10px] font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 transition cursor-pointer"
-            >
-              Diabetic Profile
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* General Error Alert */}
@@ -270,7 +185,7 @@ export default function IntakeForm() {
             <input
               type="text"
               required
-              placeholder="e.g. Eleanor Vance"
+              placeholder="e.g. Jane Doe"
               value={formData.fullName}
               onChange={(e) => handleInputChange('fullName', e.target.value)}
               className={`w-full px-3.5 py-2 rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 ${

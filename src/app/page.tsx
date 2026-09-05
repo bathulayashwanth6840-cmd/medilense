@@ -47,11 +47,11 @@ export default function HomePage() {
             {/* CTA Buttons */}
             <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
               <Link
-                href="/patients/p-demo-eleanor"
+                href="/patients"
                 className="inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-sm shadow-lg shadow-teal-600/25 transition cursor-pointer"
               >
-                <Activity className="w-4 h-4" />
-                Launch Demo Patient Dashboard (Eleanor Vance)
+                <Users className="w-4 h-4" />
+                Explore Patients Registry
                 <ArrowRight className="w-4 h-4" />
               </Link>
 
@@ -59,7 +59,7 @@ export default function HomePage() {
                 href="/patients/new"
                 className="inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-bold text-sm shadow-xs transition cursor-pointer"
               >
-                <Users className="w-4 h-4 text-teal-600" />
+                <Activity className="w-4 h-4 text-teal-600" />
                 New Patient Intake
               </Link>
             </div>

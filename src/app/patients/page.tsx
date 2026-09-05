@@ -92,8 +92,29 @@ export default function PatientsPage() {
             Loading patient records...
           </div>
         ) : filtered.length === 0 ? (
-          <div className="py-20 text-center text-xs text-slate-400">
-            No patient records match "{search}".
+          <div className="py-16 text-center max-w-md mx-auto p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 mx-auto flex items-center justify-center">
+              <Users className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                {search ? 'No Matching Patients' : 'No Patient Records in Registry'}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                {search
+                  ? `No patient records match "${search}". Try searching by another name or MRN.`
+                  : 'Start by submitting a standardized clinical intake form to initialize patient records with verifiable provenance.'}
+              </p>
+            </div>
+            {!search && (
+              <Link
+                href="/patients/new"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs shadow-md shadow-teal-600/20 transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                Register First Patient
+              </Link>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">

@@ -62,11 +62,11 @@ export default function Header() {
                 Patients Roster
               </Link>
               <Link
-                href="/patients/p-demo-eleanor"
+                href="/patients/new"
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
               >
                 <Activity className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                Active Clinical Dashboard
+                New Intake
               </Link>
             </nav>
           </div>
