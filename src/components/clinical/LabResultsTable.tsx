@@ -227,7 +227,7 @@ export default function LabResultsTable({
                       <ProvenanceBadge
                         provenanceType={lab.provenanceSource}
                         provenanceId={lab.provenanceId}
-                        sourceDocumentName="LabCorp_CBC_2026.pdf"
+                        sourceDocumentName="Source Lab Report"
                         pageNumber={lab.sourcePageNumber || 1}
                         confidence={lab.confidenceScore || 0.984}
                         sourceText={lab.sourceOriginalSnippet}

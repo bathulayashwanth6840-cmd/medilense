@@ -42,18 +42,22 @@ export default function PatientHeader({
 }: PatientHeaderProps) {
   const labs = patient.labResults || [];
   const verifiedLabs = labs.filter(l => l.verificationStatus === 'VERIFIED' || l.verificationStatus === 'EDITED').length;
-  const verificationRate = labs.length > 0 ? Math.round((verifiedLabs / labs.length) * 100) : 100;
+  const verificationRate = labs.length > 0 ? Math.round((verifiedLabs / labs.length) * 100) : 0;
   
-  const pendingConflicts = (patient.conflicts || []).filter(c => c.resolutionStatus === 'DETECTED');
+  const pendingConflicts = (patient.conflicts || []).filter(
+    c => c.resolutionStatus === 'UNREVIEWED' || c.resolutionStatus === 'DETECTED'
+  );
   const outOfRangeLabs = labs.filter(l => l.interpretation === 'LOW' || l.interpretation === 'HIGH').length;
 
   // Calculate age if DOB exists
-  let ageString = '';
+  let ageString = 'Age: Not available';
   if (patient.dateOfBirth) {
     const dob = new Date(patient.dateOfBirth);
-    const diffMs = Date.now() - dob.getTime();
-    const ageDate = new Date(diffMs);
-    ageString = `Age ${Math.abs(ageDate.getUTCFullYear() - 1970)}`;
+    if (!isNaN(dob.getTime())) {
+      const diffMs = Date.now() - dob.getTime();
+      const ageDate = new Date(diffMs);
+      ageString = `Age ${Math.abs(ageDate.getUTCFullYear() - 1970)}`;
+    }
   }
 
   return (
@@ -62,15 +66,15 @@ export default function PatientHeader({
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-slate-100 dark:border-slate-800">
         <div className="flex items-start gap-4">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-indigo-600 flex items-center justify-center text-white text-xl font-bold shadow-md shadow-teal-500/20 shrink-0">
-            {patient.fullName.charAt(0)}
+            {patient.fullName ? patient.fullName.charAt(0).toUpperCase() : 'P'}
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                {patient.fullName}
+                {patient.fullName || 'Unnamed Patient'}
               </h1>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 font-mono">
-                {patient.identifier}
+                {patient.identifier || 'MRN: Not available'}
               </span>
               {pendingConflicts.length > 0 && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 animate-pulse">
@@ -82,26 +86,20 @@ export default function PatientHeader({
 
             {/* Demographics Strip */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-slate-500 dark:text-slate-400">
-              {ageString && (
-                <span className="flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                  {ageString} ({formatDate(patient.dateOfBirth)})
-                </span>
-              )}
-              <span className="capitalize font-medium text-slate-700 dark:text-slate-300">
-                Sex: {patient.sex.toLowerCase()}
+              <span className="flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                {ageString} {patient.dateOfBirth ? `(${formatDate(patient.dateOfBirth)})` : '(DOB: Not available)'}
               </span>
-              {patient.bloodType && (
-                <span className="font-semibold text-rose-600 dark:text-rose-400">
-                  Blood: {patient.bloodType}
-                </span>
-              )}
-              {patient.contactNumber && (
-                <span className="flex items-center gap-1">
-                  <Phone className="w-3.5 h-3.5 text-slate-400" />
-                  {patient.contactNumber}
-                </span>
-              )}
+              <span className="capitalize font-medium text-slate-700 dark:text-slate-300">
+                Sex: {patient.sex ? patient.sex.toLowerCase() : 'Not available'}
+              </span>
+              <span className="font-semibold text-slate-600 dark:text-slate-400">
+                Blood: {patient.bloodType || 'Not available'}
+              </span>
+              <span className="flex items-center gap-1">
+                <Phone className="w-3.5 h-3.5 text-slate-400" />
+                {patient.contactNumber || 'Phone: Not available'}
+              </span>
             </div>
           </div>
         </div>
@@ -216,24 +214,26 @@ export default function PatientHeader({
         </div>
       </div>
 
-      {/* Navigation Tabs (Overview, Labs & Tests, Medications & Allergies, Timeline, Documents, Audit) */}
+      {/* Navigation Tabs (Overview, Documents, Structured Record, Lab Results, Conflicts, Verification, Evidence, Audit, Trends) */}
       {viewMode === 'CLINICIAN' && (
-        <div className="flex items-center gap-2 overflow-x-auto border-t border-slate-100 dark:border-slate-800 mt-6 pt-4 text-xs font-medium">
+        <div className="flex items-center gap-1.5 overflow-x-auto border-t border-slate-100 dark:border-slate-800 mt-6 pt-4 text-xs font-semibold">
           {[
-            { id: 'overview', label: 'Overview' },
-            { id: 'labs', label: 'Labs & Tests' },
-            { id: 'meds', label: 'Medications & Allergies' },
-            { id: 'timeline', label: 'Timeline' },
+            { id: 'overview', label: 'Patient Overview' },
             { id: 'documents', label: `Documents (${(patient.documents || []).length})` },
-            { id: 'audit', label: 'Audit' },
-            { id: 'trends', label: '📈 Longitudinal Trends' },
+            { id: 'records', label: 'Structured Record' },
+            { id: 'labs', label: `Lab Results (${labs.length})` },
+            { id: 'conflicts', label: `Conflicts (${pendingConflicts.length})` },
+            { id: 'verification', label: 'Verification' },
+            { id: 'evidence', label: 'Evidence' },
+            { id: 'audit', label: 'Audit Trail' },
+            { id: 'trends', label: '📈 Lab Trends' },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => onSelectTab(tab.id)}
-              className={`px-4 py-2 rounded-xl transition cursor-pointer whitespace-nowrap ${
+              className={`px-3.5 py-2 rounded-xl transition cursor-pointer whitespace-nowrap ${
                 activeTab === tab.id
-                  ? 'bg-teal-600 text-white font-semibold shadow-xs'
+                  ? 'bg-teal-600 text-white shadow-xs'
                   : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
               }`}
             >

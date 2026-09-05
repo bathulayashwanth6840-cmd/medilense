@@ -114,7 +114,7 @@ export const ProvenanceBadge: React.FC<ProvenanceBadgeProps> = ({
     provenanceType: type,
     version: history.length || 1,
     documentId: documentId || null,
-    documentName: sourceDocumentName || 'LabCorp_CBC_2026.pdf',
+    documentName: sourceDocumentName || 'Source Clinical Report',
     pageNumber: pageNumber || 1,
     sourceText: sourceText || `${entityName}: ${entityValue || ''} ${entityUnit || ''}`,
     confidence: confidence || 0.984,

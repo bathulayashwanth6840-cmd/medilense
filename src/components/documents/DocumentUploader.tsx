@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 interface DocumentUploaderProps {
-  patientId: string;
+  patientId?: string;
   onUploadSuccess: () => void;
   onClose?: () => void;
 }
@@ -119,6 +119,8 @@ export default function DocumentUploader({
   onUploadSuccess,
   onClose,
 }: DocumentUploaderProps) {
+  const [targetPatientId, setTargetPatientId] = useState<string>(patientId || '');
+  const [patients, setPatients] = useState<any[]>([]);
   const [selectedTab, setSelectedTab] = useState<'FILE' | 'TEXT' | 'SAMPLES'>('FILE');
   const [docType, setDocType] = useState('LAB_REPORT');
   const [rawText, setRawText] = useState('');
@@ -126,6 +128,24 @@ export default function DocumentUploader({
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   
+  React.useEffect(() => {
+    if (patientId) {
+      setTargetPatientId(patientId);
+    } else {
+      fetch('/api/patients')
+        .then((res) => res.json())
+        .then((json) => {
+          if (json.success && Array.isArray(json.data)) {
+            setPatients(json.data);
+            if (json.data.length > 0) {
+              setTargetPatientId(json.data[0].id);
+            }
+          }
+        })
+        .catch(console.error);
+    }
+  }, [patientId]);
+
   // Ingestion State Machine
   const [isUploading, setIsUploading] = useState(false);
   const [currentStageIndex, setCurrentStageIndex] = useState<number>(-1);
@@ -202,6 +222,13 @@ export default function DocumentUploader({
     setUploadProgress(10);
     setCurrentStatus('Uploading & computing SHA-256 checksum...');
 
+    const activePatientId = targetPatientId || patientId;
+    if (!activePatientId) {
+      setErrorMessage('Please select or register a patient record before uploading documents.');
+      setIsUploading(false);
+      return;
+    }
+
     try {
       if (selectedTab === 'FILE') {
         if (!file) {
@@ -210,7 +237,7 @@ export default function DocumentUploader({
 
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('patientId', patientId);
+        formData.append('patientId', activePatientId);
         formData.append('documentType', docType);
 
         // Progress simulation
@@ -239,7 +266,7 @@ export default function DocumentUploader({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            patientId,
+            patientId: activePatientId,
             originalFileName: fileName || 'Clinical_Note_Entry.txt',
             documentType: docType,
             rawText: rawText,
@@ -357,6 +384,32 @@ export default function DocumentUploader({
 
       {/* Tab Contents */}
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+        {/* Optional Patient Selector if not pre-bound to a specific patient */}
+        {!patientId && (
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-xs">
+            <label className="font-bold text-slate-800 dark:text-slate-200 block mb-1">
+              Target Patient Record
+            </label>
+            {patients.length > 0 ? (
+              <select
+                value={targetPatientId}
+                onChange={(e) => setTargetPatientId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500"
+              >
+                {patients.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.fullName} ({p.identifier})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="text-[11px] text-amber-700 dark:text-amber-400">
+                No patients in registry yet. Please complete a patient intake first.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* TAB A: PDF UPLOAD */}
         {selectedTab === 'FILE' && (
           <div className="space-y-3">

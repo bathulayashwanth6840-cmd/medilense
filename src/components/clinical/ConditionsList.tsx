@@ -73,7 +73,7 @@ export default function ConditionsList({
                   <ProvenanceBadge
                     provenanceType={cond.provenanceSource}
                     provenanceId={cond.provenanceId}
-                    sourceDocumentName="LabCorp_CBC_2026.pdf"
+                    sourceDocumentName="Medical History"
                     pageNumber={cond.sourcePageNumber || 1}
                     confidence={cond.confidenceScore || 0.98}
                     sourceText={cond.sourceOriginalSnippet || `Condition: ${cond.conditionName} (${cond.clinicalStatus})`}

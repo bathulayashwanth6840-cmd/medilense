@@ -30,17 +30,35 @@ async function testLiveServer() {
     }
   }
 
-  // 1. Check Root & Patient Pages
+  // 1. Check Root & Dashboard Pages
+  console.log('  --- Testing Navigation & Dashboard Pages ---');
   await checkRoute('/', 'GET');
+  await checkRoute('/dashboard', 'GET');
   await checkRoute('/patients', 'GET');
-  await checkRoute('/patients/p-demo-eleanor', 'GET');
   await checkRoute('/patients/new', 'GET');
+  await checkRoute('/documents', 'GET');
+  await checkRoute('/conflicts', 'GET');
+  await checkRoute('/verification', 'GET');
+  await checkRoute('/trends', 'GET');
+  await checkRoute('/records', 'GET');
+  await checkRoute('/evidence', 'GET');
+  await checkRoute('/extractions', 'GET');
+  await checkRoute('/audit', 'GET');
+  await checkRoute('/settings', 'GET');
 
-  // 2. Check Patients API
+  // 2. Check Global Stats API & Documents API
+  console.log('\n  --- Testing Global Dashboard APIs ---');
+  const statsRes = await checkRoute('/api/stats', 'GET');
+  console.log(`         Live Stats -> Patients: ${statsRes?.data?.totalPatients}, Documents: ${statsRes?.data?.totalDocuments}, Conflicts: ${statsRes?.data?.activeConflicts}, Pending Verification: ${statsRes?.data?.pendingVerification}`);
+
+  const docsRes = await checkRoute('/api/documents', 'GET');
+  console.log(`         Global Documents Registry -> ${docsRes?.data?.length || 0} total documents`);
+
+  // 3. Check Patients API
   const patientsJson = await checkRoute('/api/patients', 'GET');
   console.log(`         Loaded ${patientsJson?.data?.length || 0} active patient records.`);
 
-  // 3. Check Live Structured Patient Intake Form (Method C)
+  // 4. Check Live Structured Patient Intake Form
   const intakePayload = {
     identifier: `MRN-LIVE-${Date.now().toString().slice(-5)}`,
     fullName: 'David K. Richardson',
@@ -64,7 +82,10 @@ async function testLiveServer() {
   if (createdPatientId) {
     console.log(`         Successfully registered patient with ID: ${createdPatientId}`);
 
-    // 4. Check Document Ingestion (Direct Text Input - Method B)
+    // Check newly registered patient page
+    await checkRoute(`/patients/${createdPatientId}`, 'GET');
+
+    // 5. Check Document Ingestion
     const uploadPayload = {
       patientId: createdPatientId,
       originalFileName: 'Live_CBC_Metabolic_Report.txt',
@@ -78,18 +99,18 @@ async function testLiveServer() {
     if (docId) {
       console.log(`         Successfully ingested document with ID: ${docId}`);
 
-      // 5. Query Document Details & Extractions
+      // 6. Query Document Details & Extractions
       await checkRoute(`/api/documents/${docId}`, 'GET');
       await checkRoute(`/api/documents/${docId}/pages`, 'GET');
       const extractions = await checkRoute(`/api/documents/${docId}/extractions`, 'GET');
       console.log(`         Retrieved ${extractions?.data?.labResults?.length || 0} labs, ${extractions?.data?.medications?.length || 0} meds.`);
 
-      // 6. Query Provenance Chain & Conflicts & Audit
+      // 7. Query Provenance Chain & Conflicts & Audit
       await checkRoute(`/api/documents/${docId}/provenance`, 'GET');
       await checkRoute(`/api/documents/${docId}/conflicts`, 'GET');
       await checkRoute(`/api/documents/${docId}/audit`, 'GET');
 
-      // 6b. Provenance System Specific Endpoints
+      // 8. Provenance System Specific Endpoints
       console.log('\n  --- Testing Provenance System Endpoints ---');
       await checkRoute(`/api/documents/${docId}/source/1`, 'GET');
 
@@ -104,7 +125,7 @@ async function testLiveServer() {
         }
       }
 
-      // 7. Verification Queue & Action Endpoints
+      // 9. Verification Queue & Action Endpoints
       await checkRoute('/api/verification', 'GET');
 
       if (extractions?.data?.labResults?.length >= 2) {
@@ -136,7 +157,7 @@ async function testLiveServer() {
         }
       }
 
-      // 8. Conflict Detection Engine Endpoints
+      // 10. Conflict Detection Engine Endpoints
       console.log('\n  --- Testing Conflict Detection Engine Endpoints ---');
       const allConflicts = await checkRoute('/api/conflicts', 'GET');
       console.log(`         Loaded ${allConflicts?.data?.length || 0} active conflicts.`);
@@ -144,13 +165,6 @@ async function testLiveServer() {
       await checkRoute('/api/conflicts?type=MEDICATION', 'GET');
       await checkRoute('/api/conflicts?severity=HIGH', 'GET');
 
-      // Add a dynamic conflict for the live test patient
-      const testConfId = `conf-live-${Date.now()}`;
-      const storeRes = await fetch(`${BASE_URL}/api/conflicts`, { method: 'GET' });
-      // If there's an existing conflict or we test with the dynamic ID
-      const activeConfId = allConflicts?.data?.[0]?.id || testConfId;
-
-      // Also create one via store or direct check
       if (allConflicts?.data?.length > 0) {
         const cId = allConflicts.data[0].id;
         await checkRoute(`/api/conflicts/${cId}`, 'GET');

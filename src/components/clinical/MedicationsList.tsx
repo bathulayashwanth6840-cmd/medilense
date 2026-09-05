@@ -104,7 +104,7 @@ export default function MedicationsList({
                     <ProvenanceBadge
                       provenanceType={med.provenanceSource}
                       provenanceId={med.provenanceId}
-                      sourceDocumentName="LabCorp_CBC_2026.pdf"
+                      sourceDocumentName="Clinical Records"
                       pageNumber={med.sourcePageNumber || 1}
                       confidence={med.confidenceScore || 0.96}
                       sourceText={med.sourceOriginalSnippet}

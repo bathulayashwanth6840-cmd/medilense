@@ -79,7 +79,7 @@ export default function AllergiesList({
                   <ProvenanceBadge
                     provenanceType={all.provenanceSource}
                     provenanceId={all.provenanceId}
-                    sourceDocumentName="LabCorp_CBC_2026.pdf"
+                    sourceDocumentName="Clinical Intake / Reports"
                     pageNumber={all.sourcePageNumber || 1}
                     confidence={all.confidenceScore || 0.99}
                     sourceText={all.sourceOriginalSnippet || `Allergy: ${all.allergen} (${all.severity || 'Moderate'})`}

@@ -7,13 +7,15 @@ import {
   Search, 
   Plus, 
   ArrowRight, 
-  Activity, 
   AlertTriangle, 
   FileText, 
   CheckCircle2,
-  Calendar
+  Calendar,
+  Activity,
+  UploadCloud
 } from 'lucide-react';
-import Header from '@/components/layout/Header';
+import AppShell from '@/components/layout/AppShell';
+import EmptyState from '@/components/layout/EmptyState';
 import { formatDate } from '@/lib/utils/formatters';
 
 export default function PatientsPage() {
@@ -42,19 +44,22 @@ export default function PatientsPage() {
   const filtered = patients.filter((p) => {
     const q = search.toLowerCase();
     return (
-      p.fullName.toLowerCase().includes(q) ||
-      p.identifier.toLowerCase().includes(q) ||
+      (p.fullName && p.fullName.toLowerCase().includes(q)) ||
+      (p.identifier && p.identifier.toLowerCase().includes(q)) ||
       (p.notes && p.notes.toLowerCase().includes(q))
     );
   });
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col">
-      <Header />
-
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Page Top */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+    <AppShell
+      breadcrumbs={[
+        { label: 'Dashboard', href: '/dashboard' },
+        { label: 'Patients' },
+      ]}
+    >
+      <div className="space-y-6">
+        {/* Page Top Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2.5">
               <Users className="w-6 h-6 text-teal-600 dark:text-teal-400" />
@@ -75,7 +80,7 @@ export default function PatientsPage() {
         </div>
 
         {/* Search Bar */}
-        <div className="mb-6 relative max-w-md">
+        <div className="relative max-w-md">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -86,35 +91,26 @@ export default function PatientsPage() {
           />
         </div>
 
-        {/* Patient Grid */}
+        {/* Patient Grid / Empty State */}
         {loading ? (
           <div className="py-20 text-center text-xs text-slate-400 animate-pulse">
             Loading patient records...
           </div>
         ) : filtered.length === 0 ? (
-          <div className="py-16 text-center max-w-md mx-auto p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 mx-auto flex items-center justify-center">
-              <Users className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">
-                {search ? 'No Matching Patients' : 'No Patient Records in Registry'}
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                {search
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
+            <EmptyState
+              icon={Users}
+              title={search ? 'No Matching Patients Found' : 'No patients yet'}
+              description={
+                search
                   ? `No patient records match "${search}". Try searching by another name or MRN.`
-                  : 'Start by submitting a standardized clinical intake form to initialize patient records with verifiable provenance.'}
-              </p>
-            </div>
-            {!search && (
-              <Link
-                href="/patients/new"
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs shadow-md shadow-teal-600/20 transition cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                Register First Patient
-              </Link>
-            )}
+                  : 'Upload a medical document or create a new patient to begin.'
+              }
+              actionHref="/patients/new"
+              actionLabel="New Patient Intake"
+              secondaryActionHref="/documents"
+              secondaryActionLabel="Upload Document"
+            />
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -128,21 +124,21 @@ export default function PatientsPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-teal-500 to-indigo-600 text-white font-bold flex items-center justify-center text-base shadow-sm">
-                        {p.fullName.charAt(0)}
+                        {p.fullName ? p.fullName.charAt(0).toUpperCase() : 'P'}
                       </div>
                       <div>
                         <h3 className="font-bold text-slate-900 dark:text-slate-100 text-sm group-hover:text-teal-600 dark:group-hover:text-teal-400 transition">
-                          {p.fullName}
+                          {p.fullName || 'Unnamed Patient'}
                         </h3>
                         <span className="text-[11px] font-mono text-slate-500">
-                          {p.identifier}
+                          {p.identifier || 'MRN: Not available'}
                         </span>
                       </div>
                     </div>
 
                     {p.conflictsCount > 0 && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" /> {p.conflictsCount} Conflict
+                        <AlertTriangle className="w-3 h-3" /> {p.conflictsCount} Conflict{p.conflictsCount > 1 ? 's' : ''}
                       </span>
                     )}
                   </div>
@@ -178,7 +174,7 @@ export default function PatientsPage() {
             ))}
           </div>
         )}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }

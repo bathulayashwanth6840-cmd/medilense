@@ -177,6 +177,60 @@ class MedLensStore {
     return doc;
   }
 
+  async getAllDocuments(): Promise<any[]> {
+    const list = Array.from(this.documents.values());
+    return list.map(doc => {
+      const patient = this.patients.get(doc.patientId);
+      return {
+        ...doc,
+        patientName: patient?.fullName || 'Unknown Patient',
+        patientIdentifier: patient?.identifier || '—',
+      };
+    }).sort((a, b) => new Date(b.uploadedAt || 0).getTime() - new Date(a.uploadedAt || 0).getTime());
+  }
+
+  async getDocumentById(id: string): Promise<any | null> {
+    const doc = this.documents.get(id);
+    if (!doc) return null;
+    const patient = this.patients.get(doc.patientId);
+    return {
+      ...doc,
+      patientName: patient?.fullName || 'Unknown Patient',
+      patientIdentifier: patient?.identifier || '—',
+    };
+  }
+
+  async getSummaryStats(): Promise<{
+    totalPatients: number;
+    totalDocuments: number;
+    pendingVerification: number;
+    activeConflicts: number;
+  }> {
+    const totalPatients = this.patients.size;
+    const totalDocuments = this.documents.size;
+    
+    // Unverified labs count
+    const unverifiedLabs = Array.from(this.labResults.values()).filter(
+      l => l.verificationStatus === 'UNVERIFIED'
+    ).length;
+    const unverifiedMeds = Array.from(this.medications.values()).filter(
+      m => m.verificationStatus === 'UNVERIFIED'
+    ).length;
+    const pendingVerification = unverifiedLabs + unverifiedMeds;
+
+    // Active unreviewed conflicts count
+    const activeConflicts = Array.from(this.conflicts.values()).filter(
+      c => c.resolutionStatus === 'UNREVIEWED' || c.resolutionStatus === 'DETECTED'
+    ).length;
+
+    return {
+      totalPatients,
+      totalDocuments,
+      pendingVerification,
+      activeConflicts,
+    };
+  }
+
   // --- LAB RESULTS ---
   async addLabResult(data: Partial<LabResultRecord>): Promise<LabResultRecord> {
     const id = data.id || uuidv4();
@@ -880,6 +934,64 @@ class MedLensStore {
 
     this.auditLogs.set(id, log);
     return log;
+  }
+
+  // --- DOCUMENTS REGISTRY ---
+  async getAllDocuments(): Promise<any[]> {
+    const list: any[] = [];
+    for (const doc of this.documents.values()) {
+      const patient = this.patients.get(doc.patientId);
+      list.push({
+        ...doc,
+        patientName: patient ? patient.fullName : 'Unknown Patient',
+        patientIdentifier: patient ? patient.identifier : 'Unknown MRN',
+      });
+    }
+    return list.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+  }
+
+  async getDocumentById(id: string): Promise<DocumentRecord | null> {
+    return this.documents.get(id) || null;
+  }
+
+  // --- SUMMARY STATS ---
+  async getSummaryStats(): Promise<{
+    totalPatients: number;
+    totalDocuments: number;
+    pendingVerification: number;
+    activeConflicts: number;
+  }> {
+    const totalPatients = this.patients.size;
+    const totalDocuments = this.documents.size;
+
+    let pendingVerification = 0;
+    for (const lab of this.labResults.values()) {
+      if (lab.verificationStatus === 'UNVERIFIED') pendingVerification++;
+    }
+    for (const med of this.medications.values()) {
+      if (med.verificationStatus === 'UNVERIFIED') pendingVerification++;
+    }
+    for (const all of this.allergies.values()) {
+      if (all.verificationStatus === 'UNVERIFIED') pendingVerification++;
+    }
+    for (const cond of this.conditions.values()) {
+      if (cond.verificationStatus === 'UNVERIFIED') pendingVerification++;
+    }
+
+    let activeConflicts = 0;
+    for (const conf of this.conflicts.values()) {
+      const status = (conf.resolutionStatus || 'UNREVIEWED').toUpperCase();
+      if (status === 'UNREVIEWED' || status === 'DETECTED') {
+        activeConflicts++;
+      }
+    }
+
+    return {
+      totalPatients,
+      totalDocuments,
+      pendingVerification,
+      activeConflicts,
+    };
   }
 }
 
