@@ -209,26 +209,38 @@ export default function SideBySideViewer({
             {/* Document Content */}
             <div className="text-xs font-sans whitespace-pre-wrap font-mono text-slate-700 dark:text-slate-300 max-h-[200px] overflow-y-auto pr-1">
               {associatedDoc.rawExtractedText ? (
-                associatedDoc.rawExtractedText.split('\n').map((line, idx) => {
-                  const isHighlighted = selectedEntity?.sourceSnippetText && line.includes(selectedEntity.sourceSnippetText);
-                  return (
-                    <div 
-                      key={idx} 
-                      className={`p-1 rounded text-[11px] transition ${
-                        isHighlighted 
-                          ? 'bg-amber-100 dark:bg-amber-950/60 border border-amber-400 text-amber-900 dark:text-amber-200 font-bold' 
-                          : 'hover:bg-slate-100 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      {line}
-                      {isHighlighted && (
-                        <span className="text-[9px] text-amber-700 dark:text-amber-400 font-sans font-semibold uppercase tracking-wider block mt-0.5">
-                          ● Matched Extraction Snippet
-                        </span>
-                      )}
-                    </div>
-                  );
-                })
+                (() => {
+                  const cleanText = associatedDoc.rawExtractedText
+                    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, ' ')
+                    .replace(/\uFFFD/g, '')
+                    .trim();
+                  
+                  const isBinaryGarbage = cleanText.length > 20 && (cleanText.match(/[\x00-\x1F]/g) || []).length > 5;
+                  const textToDisplay = isBinaryGarbage 
+                    ? `[Scanned Document: ${associatedDoc.originalFileName}]\nVisual image ingested for Multimodal AI Vision analysis.`
+                    : cleanText;
+
+                  return textToDisplay.split('\n').map((line, idx) => {
+                    const isHighlighted = selectedEntity?.sourceSnippetText && line.includes(selectedEntity.sourceSnippetText);
+                    return (
+                      <div 
+                        key={idx} 
+                        className={`p-1 rounded text-[11px] transition ${
+                          isHighlighted 
+                            ? 'bg-amber-100 dark:bg-amber-950/60 border border-amber-400 text-amber-900 dark:text-amber-200 font-bold' 
+                            : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        {line}
+                        {isHighlighted && (
+                          <span className="text-[9px] text-amber-700 dark:text-amber-400 font-sans font-semibold uppercase tracking-wider block mt-0.5">
+                            ● Matched Extraction Snippet
+                          </span>
+                        )}
+                      </div>
+                    );
+                  });
+                })()
               ) : (
                 <div className="text-slate-400 text-xs italic py-4 text-center">
                   Raw text extraction completed for this document.
