@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# secure medical file storage
+/storage/secure_uploads/*
+!/storage/secure_uploads/.gitkeep
+

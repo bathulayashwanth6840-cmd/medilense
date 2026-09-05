@@ -451,14 +451,16 @@ export default function PatientDashboardPage({
 
       {/* Upload Document Modal */}
       {showUploadModal && (
-        <DocumentUploader
-          patientId={patient.id}
-          onUploadSuccess={() => {
-            setShowUploadModal(false);
-            fetchPatient();
-          }}
-          onClose={() => setShowUploadModal(false)}
-        />
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <DocumentUploader
+            patientId={patient.id}
+            onUploadSuccess={() => {
+              setShowUploadModal(false);
+              fetchPatient();
+            }}
+            onClose={() => setShowUploadModal(false)}
+          />
+        </div>
       )}
 
       {/* Audit Trail Drawer Modal */}

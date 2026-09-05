@@ -104,38 +104,34 @@ export async function generateClinicalSummary(
       const model = genAI.getGenerativeModel({
         model: 'gemini-1.5-flash',
         generationConfig: {
-          responseMimeType: 'application/json',
-          temperature: 0.2,
+          temperature: 0.1,
         },
       });
 
-      const prompt = `${NON_DIAGNOSTIC_SUMMARIZER_PROMPT}
+      const prompt = `${NON_DIAGNOSTIC_SUMMARIZER_PROMPT}\n\nClinical Record Context:\n${JSON.stringify(
+        clinicalContext,
+        null,
+        2
+      )}\n\nProvide structured synthesis in JSON format: { "summaryText": string, "keyFindings": string[], "notableChanges": string[], "missingInformation": string[] }`;
 
-Format output as JSON:
-{
-  "summaryText": "concise factual digest string",
-  "keyFindings": ["fact 1", "fact 2"],
-  "notableChanges": ["change 1 across dates"],
-  "missingInformation": ["missing piece 1"]
-}
-
-Patient Record Data:
-${JSON.stringify(clinicalContext, null, 2)}
-`;
-
-      const response = await model.generateContent(prompt);
-      const json = JSON.parse(response.response.text());
-      const validation = validateNonDiagnosticGuardrails(json.summaryText);
-
-      return {
-        summaryText: json.summaryText,
-        keyFindings: json.keyFindings || [],
-        notableChanges: json.notableChanges || [],
-        missingInformation: json.missingInformation || [],
-        guardrailStatus: validation.passed ? 'PASSED' : 'FLAGGED',
-      };
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      
+      // Attempt JSON parse
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        const guardrailCheck = validateNonDiagnosticGuardrails(parsed.summaryText || '');
+        return {
+          summaryText: parsed.summaryText || '',
+          keyFindings: parsed.keyFindings || [],
+          notableChanges: parsed.notableChanges || [],
+          missingInformation: parsed.missingInformation || [],
+          guardrailStatus: guardrailCheck.passed ? 'PASSED' : 'FLAGGED',
+        };
+      }
     } catch (err) {
-      console.error('Gemini summary generation fallback:', err);
+      console.warn('Gemini summary generation failed, activating deterministic synthesis engine:', err);
     }
   }
 
@@ -153,12 +149,18 @@ function fallbackClinicalParser(text: string, fileName: string): ExtractedData {
   const conditions: ExtractedData['conditions'] = [];
   const observations: ExtractedData['observations'] = [];
 
+  if (!text) {
+    return {
+      labResults,
+      medications,
+      allergies,
+      conditions,
+      observations,
+    };
+  }
+
   const lines = text.split(/\r?\n/);
   let pageNum = 1;
-
-  // Patterns for Lab lines:
-  // e.g., "Hemoglobin  11.2  g/dL  13.0 - 17.0" or "WBC Count: 6.8 k/uL (Ref: 4.5 - 11.0)"
-  const labRegex = /([A-Za-z0-9\s/–-]+?)[:\s\t]+([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%μuLdLmg\^]+)?\s*(?:\(?(?:Ref(?:erence)?(?:\s*Range)?[:\s]*)?([<>]?\s*[0-9]+(?:\.[0-9]+)?\s*(?:-|–|to)\s*[0-9]+(?:\.[0-9]+)?|[<>=]\s*[0-9]+(?:\.[0-9]+)?|Negative|Non[- ]reactive|Normal)\)?)?/i;
 
   // Patient metadata patterns
   let extractedName: string | null = null;
@@ -177,8 +179,8 @@ function fallbackClinicalParser(text: string, fileName: string): ExtractedData {
     }
 
     // Check Patient Info
-    if (/patient\s*name[:\s]+([a-zA-Z\s]+)/i.test(line)) {
-      extractedName = line.match(/patient\s*name[:\s]+([a-zA-Z\s]+)/i)?.[1]?.trim() || null;
+    if (/patient(?:\s*name)?[:\s]+([a-zA-Z\s]+)/i.test(line)) {
+      extractedName = line.match(/patient(?:\s*name)?[:\s]+([a-zA-Z\s]+)/i)?.[1]?.trim() || null;
     }
     if (/dob|date\s*of\s*birth[:\s]+([0-9/-]+)/i.test(line)) {
       extractedDob = line.match(/dob|date\s*of\s*birth[:\s]+([0-9/-]+)/i)?.[1]?.trim() || null;
@@ -193,10 +195,10 @@ function fallbackClinicalParser(text: string, fileName: string): ExtractedData {
       reportDate = line.match(/report\s*date|collection\s*date|date[:\s]+([0-9/-]{8,10})/i)?.[1]?.trim() || null;
     }
 
-    // Check Medications (e.g. "Metformin 500mg PO Twice daily" or "Rx: Lisinopril 10 mg daily")
-    if (/(?:rx|medication|taking|prescribed)[:\s]+([a-zA-Z0-9\s]+?)\s+([0-9]+\s*(?:mg|mcg|ml|units))\s*([a-zA-Z\s]+)?/i.test(line)) {
-      const medMatch = line.match(/(?:rx|medication|taking|prescribed)[:\s]+([a-zA-Z0-9\s]+?)\s+([0-9]+\s*(?:mg|mcg|ml|units))\s*([a-zA-Z\s]+)?/i);
-      if (medMatch) {
+    // Check Medications (e.g. "Rx: Ferrous Sulfate 325 mg PO once daily" or "Metformin 500mg twice daily")
+    if (/(?:rx|medication|taking|prescribed)[:\s]+([a-zA-Z0-9\s]+?)\s+([0-9]+\s*(?:mg|mcg|ml|units|mEq|IU))\s*([a-zA-Z\s]+)?/i.test(line)) {
+      const medMatch = line.match(/(?:rx|medication|taking|prescribed)[:\s]+([a-zA-Z0-9\s]+?)\s+([0-9]+\s*(?:mg|mcg|ml|units|mEq|IU))\s*([a-zA-Z\s]+)?/i);
+      if (medMatch && medMatch[1]) {
         medications.push({
           drugName: medMatch[1].trim(),
           dosage: medMatch[2].trim(),
@@ -210,25 +212,30 @@ function fallbackClinicalParser(text: string, fileName: string): ExtractedData {
       }
     }
 
-    // Check Allergies (e.g. "Allergy: Penicillin - Reaction: Anaphylaxis/Rash")
-    if (/allergy|allergies[:\s]+([a-zA-Z0-9\s]+?)(?:[-:]\s*(?:reaction[:\s]*)?([a-zA-Z\s]+))?$/i.test(line)) {
-      const allMatch = line.match(/allergy|allergies[:\s]+([a-zA-Z0-9\s]+?)(?:[-:]\s*(?:reaction[:\s]*)?([a-zA-Z\s]+))?$/i);
-      if (allMatch && allMatch[1].trim().toLowerCase() !== 'none' && allMatch[1].trim().toLowerCase() !== 'nkda') {
-        allergies.push({
-          allergen: allMatch[1].trim(),
-          reaction: allMatch[2]?.trim() || 'Recorded Reaction',
-          severity: /anaphylaxis|severe|shock/i.test(line) ? 'SEVERE' : 'MODERATE',
-          sourcePageNumber: pageNum,
-          sourceOriginalSnippet: line,
-          confidenceScore: 0.94,
-        });
+    // Check Allergies (e.g. "Allergy: Penicillin - Reaction: Severe Urticaria", "Allergy: Aspirin (Wheezing)")
+    if (/allergy|allergies/i.test(line)) {
+      const cleanLine = line.replace(/^.*?(?:allergy|allergies)[:\s]*/i, '').trim();
+      if (cleanLine && cleanLine.toLowerCase() !== 'none' && cleanLine.toLowerCase() !== 'nkda') {
+        const match = cleanLine.match(/^([^(\-:\n]+)(?:[-(:\s]+(?:reaction[:\s]*)?([^)\n]+)\)?)?/i);
+        const allergen = match && match[1] ? match[1].trim() : cleanLine;
+        const reaction = match && match[2] ? match[2].replace(/[()]/g, '').trim() : 'Documented Reaction';
+        if (allergen) {
+          allergies.push({
+            allergen,
+            reaction,
+            severity: /anaphylaxis|severe|shock|urticaria|wheezing/i.test(line) ? 'SEVERE' : 'MODERATE',
+            sourcePageNumber: pageNum,
+            sourceOriginalSnippet: line,
+            confidenceScore: 0.94,
+          });
+        }
       }
     }
 
     // Check Conditions / Diagnoses documented in record
     if (/(?:assessment|history of|known condition|dx|diagnosis)[:\s]+([a-zA-Z0-9\s,-]+)/i.test(line)) {
       const condMatch = line.match(/(?:assessment|history of|known condition|dx|diagnosis)[:\s]+([a-zA-Z0-9\s,-]+)/i);
-      if (condMatch) {
+      if (condMatch && condMatch[1]) {
         conditions.push({
           conditionName: condMatch[1].trim(),
           clinicalStatus: 'ACTIVE',
@@ -240,19 +247,37 @@ function fallbackClinicalParser(text: string, fileName: string): ExtractedData {
     }
 
     // Check Lab Result Lines
-    const knownTests = ['Hemoglobin', 'HbA1c', 'WBC', 'Platelets', 'Creatinine', 'eGFR', 'Glucose', 'Total Cholesterol', 'Triglycerides', 'HDL', 'LDL', 'Sodium', 'Potassium', 'Ferritin', 'TSH', 'AST', 'ALT', 'BUN', 'Bilirubin'];
+    const knownTests = [
+      'Hemoglobin', 'Hematocrit', 'HbA1c', 'WBC', 'Platelets', 'MCV',
+      'Creatinine', 'eGFR', 'Glucose', 'Total Cholesterol', 'Triglycerides',
+      'HDL', 'LDL', 'Sodium', 'Potassium', 'Ferritin', 'TSH', 'AST', 'ALT',
+      'BUN', 'Bilirubin', 'Magnesium', 'Vitamin D', 'Vitamin B12', 'CRP', 'Troponin'
+    ];
+
     for (const test of knownTests) {
-      if (new RegExp(`\\b${test}\\b`, 'i').test(line)) {
-        const valMatch = line.match(/([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%μuLdLmg\^]+)?/);
-        if (valMatch) {
+      if (
+        new RegExp(`\\b${test}\\b`, 'i').test(line) &&
+        !line.toLowerCase().startsWith('rx:') &&
+        !line.toLowerCase().startsWith('allergy:')
+      ) {
+        // Match value following test name or in line
+        const valRegex = new RegExp(`${test}[:\\s\\t]+([<>]?\\s*[0-9]+(?:\\.[0-9]+)?)\\s*([a-zA-Z/%μuLdLmg\\^23-]+)?`, 'i');
+        const valMatch = line.match(valRegex) || line.match(/([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z/%μuLdLmg\\^23-]+)?/);
+
+        if (valMatch && valMatch[1]) {
           // Extract reference range if present
-          const rangeMatch = line.match(/([<>]?\s*[0-9]+(?:\.[0-9]+)?\s*(?:-|–|to)\s*[0-9]+(?:\.[0-9]+)?|[<>=]\s*[0-9]+(?:\.[0-9]+)?)/);
+          const rangeMatch = line.match(/(?:Ref(?:erence)?(?:\s*Range)?[:\s]*)?([<>]?\s*[0-9]+(?:\.[0-9]+)?\s*(?:-|–|to)\s*[0-9]+(?:\.[0-9]+)?|[<>=]\s*[0-9]+(?:\.[0-9]+)?)/i);
+          let rawRange = rangeMatch ? rangeMatch[1] || rangeMatch[0] : null;
+          if (rawRange && rawRange.trim() === valMatch[1]?.trim()) {
+            rawRange = null;
+          }
+
           labResults.push({
             testName: test,
             testCategory: 'Routine Chemistry & Hematology',
-            measuredValue: valMatch[1],
-            unit: valMatch[2] || (test === 'Hemoglobin' ? 'g/dL' : test === 'Glucose' ? 'mg/dL' : test === 'HbA1c' ? '%' : ''),
-            referenceRangeText: rangeMatch ? rangeMatch[0] : null,
+            measuredValue: valMatch[1].trim(),
+            unit: valMatch[2]?.trim() || (test === 'Hemoglobin' ? 'g/dL' : test === 'Glucose' ? 'mg/dL' : test === 'HbA1c' ? '%' : ''),
+            referenceRangeText: rawRange,
             sourcePageNumber: pageNum,
             sourceOriginalSnippet: line,
             confidenceScore: 0.97,

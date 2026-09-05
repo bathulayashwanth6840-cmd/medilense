@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   User, 
@@ -12,116 +12,276 @@ import {
   BookmarkCheck, 
   FileText,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  Tag,
+  AlertCircle,
+  Clock,
+  Plus,
+  Trash2,
+  CheckCircle2,
+  FileHeart,
+  Stethoscope,
+  Activity
 } from 'lucide-react';
+import { PatientIntakeFormSchema, PatientIntakeFormData } from '@/lib/validation/schemas';
+import { z } from 'zod';
 
 export default function IntakeForm() {
   const router = useRouter();
-  const [formData, setFormData] = useState({
+
+  // Form State with clean initial values
+  const [formData, setFormData] = useState<PatientIntakeFormData>({
     identifier: `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
     fullName: '',
-    dateOfBirth: '1985-06-15',
+    dateOfBirth: '1982-04-18',
+    age: 44,
     sex: 'FEMALE',
-    contactNumber: '+1 (555) 345-6789',
-    bloodType: 'O+',
-    emergencyContact: 'Family Contact - +1 (555) 876-5432',
-    symptoms: 'Patient reports mild fatigue and headache for 2 weeks.',
-    conditions: 'Mild Hypertension',
-    allergies: 'Penicillin',
-    medications: 'Lisinopril 10mg daily',
-    notes: 'Baseline comprehensive clinical intake entered via web portal.',
+    contactNumber: '+1 (555) 482-9012',
+    bloodType: 'A+',
+    emergencyContact: 'Mark Vance (Spouse) - +1 (555) 482-9015',
+    symptoms: 'Mild fatigue, exertional shortness of breath for 3 weeks, morning dizziness',
+    existingConditions: 'Essential Hypertension (diagnosed 2021), Mild Hypovitaminosis D',
+    allergies: 'Penicillin (Severe Hives & Wheezing), Sulfa Drugs (Maculopapular Rash)',
+    medications: 'Lisinopril 10mg PO once daily in morning, Atorvastatin 10mg PO at bedtime',
+    medicalHistory: 'Appendectomy (2014), Family history of early coronary artery disease (Maternal)',
+    additionalNotes: 'Baseline structured intake submitted via clinical web portal. Requested comprehensive CBC & metabolic panel review.',
   });
 
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [isSuccess, setIsSuccess] = useState(false);
+
+  // Auto-calculate age whenever dateOfBirth changes
+  useEffect(() => {
+    if (formData.dateOfBirth) {
+      const birth = new Date(formData.dateOfBirth);
+      const now = new Date();
+      if (!isNaN(birth.getTime()) && birth <= now) {
+        let calculatedAge = now.getFullYear() - birth.getFullYear();
+        const m = now.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) {
+          calculatedAge--;
+        }
+        setFormData(prev => ({ ...prev, age: Math.max(0, calculatedAge) }));
+      }
+    }
+  }, [formData.dateOfBirth]);
+
+  const handleInputChange = (field: keyof PatientIntakeFormData, value: any) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    // Clear error on edit
+    if (fieldErrors[field]) {
+      setFieldErrors(prev => {
+        const next = { ...prev };
+        delete next[field];
+        return next;
+      });
+    }
+  };
+
+  const handlePrefillDemo = (scenario: 'CARDIAC' | 'DIABETIC' | 'ANEMIA') => {
+    if (scenario === 'CARDIAC') {
+      setFormData({
+        identifier: `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
+        fullName: 'Jonathan Miller',
+        dateOfBirth: '1968-11-23',
+        age: 57,
+        sex: 'MALE',
+        contactNumber: '+1 (555) 723-8841',
+        bloodType: 'O+',
+        emergencyContact: 'Sarah Miller (Wife) - +1 (555) 723-8840',
+        symptoms: 'Occasional palpitations and chest tightness during heavy exertion',
+        existingConditions: 'Hyperlipidemia, Mild Essential Hypertension',
+        allergies: 'Codeine (Nausea & Dizziness)',
+        medications: 'Atorvastatin 20mg daily, Lisinopril 10mg daily',
+        medicalHistory: 'Coronary stent placed in 2022, Non-smoker for 10 years',
+        additionalNotes: 'Routine cardiology follow-up intake.',
+      });
+    } else if (scenario === 'DIABETIC') {
+      setFormData({
+        identifier: `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
+        fullName: 'Maria Rodriguez',
+        dateOfBirth: '1975-08-14',
+        age: 51,
+        sex: 'FEMALE',
+        contactNumber: '+1 (555) 390-1122',
+        bloodType: 'B+',
+        emergencyContact: 'Carlos Rodriguez (Son) - +1 (555) 390-1125',
+        symptoms: 'Increased thirst and mild peripheral tingling in lower extremities',
+        existingConditions: 'Type 2 Diabetes Mellitus, Diabetic Neuropathy',
+        allergies: 'Sulfa Drugs (Erythematous rash)',
+        medications: 'Metformin 1000mg twice daily with meals, Glipizide 5mg daily',
+        medicalHistory: 'Gestational diabetes during 1999 pregnancy, Annual retinal scan normal',
+        additionalNotes: 'Endocrinology quarterly management intake.',
+      });
+    } else {
+      setFormData({
+        identifier: `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
+        fullName: 'Eleanor Vance',
+        dateOfBirth: '1972-04-14',
+        age: 54,
+        sex: 'FEMALE',
+        contactNumber: '+1 (555) 839-4401',
+        bloodType: 'A+',
+        emergencyContact: 'Mark Vance - +1 (555) 839-4402',
+        symptoms: 'Generalized fatigue, brittle nails, exertional dyspnea for 2 months',
+        existingConditions: 'Microcytic Anemia, Hypovitaminosis D, Essential Hypertension',
+        allergies: 'Penicillin (Severe Anaphylaxis/Urticaria), Sulfa (Maculopapular Rash)',
+        medications: 'Ferrous Sulfate 325mg PO daily, Ergocalciferol 50,000 IU weekly, Atorvastatin 10mg PO daily',
+        medicalHistory: 'Mild iron deficiency diagnosed in 2024, Cholecystectomy (2018)',
+        additionalNotes: 'Comprehensive baseline intake for MedLens Document Intelligence.',
+      });
+    }
+    setFieldErrors({});
+    setGeneralError(null);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    setErrorMessage('');
+    setFieldErrors({});
+    setGeneralError(null);
 
     try {
-      // 1. Create Patient Profile
-      const res = await fetch('/api/patients', {
+      // 1. Client-Side Zod Validation
+      const parseResult = PatientIntakeFormSchema.safeParse(formData);
+      if (!parseResult.success) {
+        const errors: Record<string, string> = {};
+        parseResult.error.issues.forEach((err: any) => {
+          const key = err.path[0] as string;
+          errors[key] = err.message;
+        });
+        setFieldErrors(errors);
+        throw new Error('Please correct the highlighted validation errors before submitting.');
+      }
+
+      // 2. Server-Side Ingestion Endpoint Call
+      const res = await fetch('/api/patients/intake', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          identifier: formData.identifier,
-          fullName: formData.fullName,
-          dateOfBirth: formData.dateOfBirth ? new Date(formData.dateOfBirth).toISOString() : null,
-          sex: formData.sex,
-          contactNumber: formData.contactNumber,
-          bloodType: formData.bloodType,
-          emergencyContact: formData.emergencyContact,
-          notes: `${formData.symptoms}\nHistory: ${formData.conditions}\nNotes: ${formData.notes}`,
-        }),
+        body: JSON.stringify(parseResult.data),
       });
 
       const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'Failed to create patient');
-
-      const patientId = json.data.id;
-
-      // 2. Add Medication from Intake if provided
-      if (formData.medications) {
-        await fetch('/api/documents/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            patientId,
-            originalFileName: 'Patient_Intake_Form.txt',
-            documentType: 'OTHER',
-            rawText: `Patient Intake Narrative\nPatient: ${formData.fullName}\nRx: ${formData.medications}\nAllergy: ${formData.allergies}\nAssessment: ${formData.conditions}`,
-          }),
-        });
+      if (!json.success) {
+        if (json.issues) {
+          const errors: Record<string, string> = {};
+          json.issues.forEach((iss: any) => {
+            errors[iss.field] = iss.message;
+          });
+          setFieldErrors(errors);
+        }
+        throw new Error(json.error || 'Intake submission failed on server.');
       }
 
-      router.push(`/patients/${patientId}`);
+      setIsSuccess(true);
+      const patientId = json.data.patient.id;
+
+      setTimeout(() => {
+        router.push(`/patients/${patientId}`);
+      }, 800);
     } catch (err: any) {
-      setErrorMessage(err.message || 'Intake failed');
+      setGeneralError(err.message || 'An error occurred during intake registration.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-6">
-      {/* Safety Notice */}
-      <div className="p-4 rounded-xl bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/60 flex items-start gap-3">
-        <ShieldCheck className="w-5 h-5 text-teal-600 dark:text-teal-400 shrink-0 mt-0.5" />
-        <div className="text-xs text-teal-900 dark:text-teal-200">
-          <h4 className="font-bold">MedLens Clinical Information Intake</h4>
-          <p className="mt-0.5 leading-relaxed">
-            All entered information is stored with <code>USER_PROVIDED</code> provenance and validated against strict schemas before inclusion in the patient record.
-          </p>
+    <form onSubmit={handleSubmit} className="max-w-4xl mx-auto space-y-6">
+      {/* Top Banner with Provenance Notice */}
+      <div className="p-4 rounded-2xl bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-teal-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+            <Stethoscope className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-teal-950 dark:text-teal-100">
+                Method C: Structured Patient Intake Form
+              </h3>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 flex items-center gap-1">
+                <Tag className="w-2.5 h-2.5" />
+                USER_PROVIDED Provenance
+              </span>
+            </div>
+            <p className="text-xs text-teal-700 dark:text-teal-300 mt-1 leading-relaxed">
+              Standardized intake protocol with strict Zod validation. All submitted clinical fields are tagged with immutable user provenance and integrated into the longitudinal patient record.
+            </p>
+          </div>
+        </div>
+
+        {/* Quick Demo Prefill Options */}
+        <div className="hidden sm:flex flex-col gap-1 shrink-0 text-right">
+          <span className="text-[10px] text-slate-400 font-semibold uppercase">Prefill Demo:</span>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => handlePrefillDemo('ANEMIA')}
+              className="px-2 py-1 text-[10px] font-bold bg-white dark:bg-slate-800 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 rounded-lg hover:bg-teal-50 transition cursor-pointer"
+            >
+              Anemia Profile
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePrefillDemo('CARDIAC')}
+              className="px-2 py-1 text-[10px] font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 transition cursor-pointer"
+            >
+              Cardiac Profile
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePrefillDemo('DIABETIC')}
+              className="px-2 py-1 text-[10px] font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 transition cursor-pointer"
+            >
+              Diabetic Profile
+            </button>
+          </div>
         </div>
       </div>
 
-      {errorMessage && (
-        <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700">
-          {errorMessage}
+      {/* General Error Alert */}
+      {generalError && (
+        <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
+          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <span className="font-bold block">Validation Alert</span>
+            <span>{generalError}</span>
+          </div>
         </div>
       )}
 
-      {/* Demographics Card */}
+      {/* SECTION 1: Patient Identity & Demographics */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-          <User className="w-4 h-4 text-teal-600" /> Patient Identity & Demographics
-        </h3>
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <User className="w-4 h-4 text-teal-600" />
+            1. Patient Identity & Demographics
+          </h4>
+          <span className="text-[10px] text-slate-400 font-mono">Step 1 of 4</span>
+        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
           <div>
             <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-              Full Name <span className="text-rose-500">*</span>
+              Full Legal Name <span className="text-rose-500">*</span>
             </label>
             <input
               type="text"
               required
-              placeholder="e.g. Jonathan Hayes"
+              placeholder="e.g. Eleanor Vance"
               value={formData.fullName}
-              onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-teal-500"
+              onChange={(e) => handleInputChange('fullName', e.target.value)}
+              className={`w-full px-3.5 py-2 rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 ${
+                fieldErrors.fullName
+                  ? 'border-rose-400 focus:ring-rose-400'
+                  : 'border-slate-300 dark:border-slate-700 focus:ring-teal-500'
+              }`}
             />
+            {fieldErrors.fullName && (
+              <span className="text-[10px] text-rose-600 mt-1 block">{fieldErrors.fullName}</span>
+            )}
           </div>
 
           <div>
@@ -132,21 +292,12 @@ export default function IntakeForm() {
               type="text"
               required
               value={formData.identifier}
-              onChange={(e) => setFormData({ ...formData, identifier: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono"
+              onChange={(e) => handleInputChange('identifier', e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs font-mono focus:ring-2 focus:ring-teal-500"
             />
-          </div>
-
-          <div>
-            <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-              Date of Birth
-            </label>
-            <input
-              type="date"
-              value={formData.dateOfBirth}
-              onChange={(e) => setFormData({ ...formData, dateOfBirth: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
-            />
+            {fieldErrors.identifier && (
+              <span className="text-[10px] text-rose-600 mt-1 block">{fieldErrors.identifier}</span>
+            )}
           </div>
 
           <div>
@@ -155,26 +306,51 @@ export default function IntakeForm() {
             </label>
             <select
               value={formData.sex}
-              onChange={(e) => setFormData({ ...formData, sex: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+              onChange={(e) => handleInputChange('sex', e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500"
             >
-              <option value="MALE">Male</option>
               <option value="FEMALE">Female</option>
+              <option value="MALE">Male</option>
               <option value="OTHER">Other</option>
-              <option value="UNKNOWN">Unknown</option>
+              <option value="UNKNOWN">Unknown / Unspecified</option>
             </select>
           </div>
 
           <div>
             <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-              Blood Type
+              Date of Birth <span className="text-slate-400">(YYYY-MM-DD)</span>
+            </label>
+            <input
+              type="date"
+              value={formData.dateOfBirth || ''}
+              onChange={(e) => handleInputChange('dateOfBirth', e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500"
+            />
+            {fieldErrors.dateOfBirth && (
+              <span className="text-[10px] text-rose-600 mt-1 block">{fieldErrors.dateOfBirth}</span>
+            )}
+          </div>
+
+          <div>
+            <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+              Age <span className="text-slate-400 font-normal">(Calculated)</span>
+            </label>
+            <div className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-slate-800 dark:text-slate-200 text-xs font-mono flex items-center justify-between">
+              <span>{formData.age !== undefined && formData.age !== null ? `${formData.age} years old` : '—'}</span>
+              <span className="text-[10px] text-slate-400">Auto</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+              Blood Group / Rh Factor
             </label>
             <input
               type="text"
               placeholder="e.g. A+, O-, B+"
-              value={formData.bloodType}
-              onChange={(e) => setFormData({ ...formData, bloodType: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+              value={formData.bloodType || ''}
+              onChange={(e) => handleInputChange('bloodType', e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs"
             />
           </div>
 
@@ -185,106 +361,180 @@ export default function IntakeForm() {
             <input
               type="text"
               placeholder="+1 (555) 000-0000"
-              value={formData.contactNumber}
-              onChange={(e) => setFormData({ ...formData, contactNumber: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+              value={formData.contactNumber || ''}
+              onChange={(e) => handleInputChange('contactNumber', e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs"
+            />
+          </div>
+
+          <div className="sm:col-span-2">
+            <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+              Emergency Contact & Relationship
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Mark Vance (Spouse) - +1 (555) 482-9015"
+              value={formData.emergencyContact || ''}
+              onChange={(e) => handleInputChange('emergencyContact', e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs"
             />
           </div>
         </div>
+      </div>
 
-        <div>
-          <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1 text-xs">
-            Emergency Contact Information
+      {/* SECTION 2: Symptoms & Presentation */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <Activity className="w-4 h-4 text-teal-600" />
+            2. Presenting Symptoms & Clinical Chief Complaint
+          </h4>
+          <span className="text-[10px] text-slate-400 font-mono">Step 2 of 4</span>
+        </div>
+
+        <div className="text-xs">
+          <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+            Reported Symptoms, Onset & Duration
           </label>
-          <input
-            type="text"
-            placeholder="Name, Relationship, Phone Number"
-            value={formData.emergencyContact}
-            onChange={(e) => setFormData({ ...formData, emergencyContact: e.target.value })}
-            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs"
+          <textarea
+            rows={3}
+            value={formData.symptoms || ''}
+            onChange={(e) => handleInputChange('symptoms', e.target.value)}
+            placeholder="e.g. Patient presents with 3 weeks of generalized fatigue, orthostatic dizziness, and shortness of breath upon stair climbing."
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500 leading-relaxed"
           />
         </div>
       </div>
 
-      {/* Clinical History & Narrative */}
+      {/* SECTION 3: Conditions, Medications & Allergies */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-          <Heart className="w-4 h-4 text-rose-600" /> Clinical History & Reported Intake
-        </h3>
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <Heart className="w-4 h-4 text-rose-600" />
+            3. Clinical Profile: Conditions, Medications & Allergies
+          </h4>
+          <span className="text-[10px] text-slate-400 font-mono">Step 3 of 4</span>
+        </div>
 
-        <div className="space-y-3 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
           <div>
             <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-              Chief Symptoms & Reasons for Presentation
+              Existing Medical Conditions
             </label>
             <textarea
-              rows={2}
-              value={formData.symptoms}
-              onChange={(e) => setFormData({ ...formData, symptoms: e.target.value })}
-              placeholder="e.g. Generalized weakness, exertional dyspnea, orthostatic dizziness"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+              rows={4}
+              value={formData.existingConditions || ''}
+              onChange={(e) => handleInputChange('existingConditions', e.target.value)}
+              placeholder="e.g. Essential Hypertension, Type 2 Diabetes, Microcytic Anemia"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500"
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-                Active Medications & Dosages
-              </label>
-              <textarea
-                rows={2}
-                value={formData.medications}
-                onChange={(e) => setFormData({ ...formData, medications: e.target.value })}
-                placeholder="e.g. Metformin 500mg twice daily"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
-              />
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-                Known Allergies & Drug Sensitivities
-              </label>
-              <textarea
-                rows={2}
-                value={formData.allergies}
-                onChange={(e) => setFormData({ ...formData, allergies: e.target.value })}
-                placeholder="e.g. Penicillin (Hives/Rash), Sulfa"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
-              />
-            </div>
+          <div>
+            <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+              Active Medications & Dosages
+            </label>
+            <textarea
+              rows={4}
+              value={formData.medications || ''}
+              onChange={(e) => handleInputChange('medications', e.target.value)}
+              placeholder="e.g. Lisinopril 10mg daily, Metformin 500mg twice daily with meals"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500"
+            />
           </div>
 
           <div>
             <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-              Existing Medical Conditions / History
+              Documented Allergies & Reactions
             </label>
             <textarea
-              rows={2}
-              value={formData.conditions}
-              onChange={(e) => setFormData({ ...formData, conditions: e.target.value })}
-              placeholder="e.g. Type 2 Diabetes, Osteoarthritis, Appendectomy in 2012"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+              rows={4}
+              value={formData.allergies || ''}
+              onChange={(e) => handleInputChange('allergies', e.target.value)}
+              placeholder="e.g. Penicillin (Severe Hives/Anaphylaxis), Sulfa (Maculopapular Rash)"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500"
             />
           </div>
         </div>
       </div>
 
-      {/* Submission */}
-      <div className="flex justify-end gap-3 pt-2">
-        <button
-          type="button"
-          onClick={() => router.push('/patients')}
-          className="px-5 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          disabled={isSubmitting || !formData.fullName}
-          className="px-6 py-2.5 rounded-xl text-xs font-semibold bg-teal-600 hover:bg-teal-500 text-white shadow-md shadow-teal-600/20 transition disabled:opacity-50 cursor-pointer"
-        >
-          {isSubmitting ? 'Registering Intake...' : 'Create Record & Open Dashboard'}
-        </button>
+      {/* SECTION 4: Past Medical History & Additional Clinical Notes */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <FileText className="w-4 h-4 text-teal-600" />
+            4. Surgical History, Family Background & Additional Notes
+          </h4>
+          <span className="text-[10px] text-slate-400 font-mono">Step 4 of 4</span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          <div>
+            <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+              Medical & Surgical History
+            </label>
+            <textarea
+              rows={3}
+              value={formData.medicalHistory || ''}
+              onChange={(e) => handleInputChange('medicalHistory', e.target.value)}
+              placeholder="e.g. Appendectomy (2014), Cholecystectomy (2018), Family history of early CAD"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+
+          <div>
+            <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+              Additional Clinical Notes / Directives
+            </label>
+            <textarea
+              rows={3}
+              value={formData.additionalNotes || ''}
+              onChange={(e) => handleInputChange('additionalNotes', e.target.value)}
+              placeholder="e.g. Patient requests comprehensive anemia panel and vitamin D level reassessment."
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Submission Bar */}
+      <div className="flex items-center justify-between pt-2">
+        <div className="text-xs text-slate-500 flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-teal-600" />
+          <span>Server-side Zod validation active</span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => router.push('/patients')}
+            className="px-5 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={isSubmitting || !formData.fullName.trim()}
+            className="px-6 py-2.5 rounded-xl text-xs font-semibold bg-teal-600 hover:bg-teal-500 text-white shadow-md shadow-teal-600/20 transition disabled:opacity-50 cursor-pointer flex items-center gap-2"
+          >
+            {isSubmitting ? (
+              <>
+                <Clock className="w-4 h-4 animate-spin" />
+                Validating & Ingesting Intake...
+              </>
+            ) : isSuccess ? (
+              <>
+                <CheckCircle2 className="w-4 h-4" />
+                Intake Created! Redirecting...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4" />
+                Register Intake & Create Record
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </form>
   );

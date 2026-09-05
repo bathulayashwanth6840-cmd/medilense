@@ -28,7 +28,20 @@ export const DocumentTypeEnum = z.enum([
   'DISCHARGE_SUMMARY',
   'PRESCRIPTION',
   'IMAGING_REPORT',
+  'CLINICIAN_NOTE',
+  'PATIENT_INTAKE_FORM',
   'OTHER',
+]);
+
+export const ProcessingStatusEnum = z.enum([
+  'UPLOADED',
+  'QUEUED',
+  'PROCESSING',
+  'EXTRACTING',
+  'VALIDATING',
+  'READY_FOR_REVIEW',
+  'COMPLETED',
+  'FAILED',
 ]);
 
 export const ConflictTypeEnum = z.enum([
@@ -37,9 +50,54 @@ export const ConflictTypeEnum = z.enum([
   'ALLERGY_DISCREPANCY',
   'LAB_VALUE_DIVERGENCE',
   'DATE_ANOMALY',
+  'DUPLICATE_DISCREPANCY',
 ]);
 
-// Patient Schemas
+// ==========================================
+// PATIENT INTAKE SCHEMAS (METHOD C)
+// ==========================================
+export const PatientIntakeFormSchema = z.object({
+  identifier: z
+    .string()
+    .min(1, 'Patient Identifier / MRN is required')
+    .max(64, 'Identifier cannot exceed 64 characters')
+    .trim(),
+  fullName: z
+    .string()
+    .min(2, 'Full Name must be at least 2 characters')
+    .max(128, 'Full Name cannot exceed 128 characters')
+    .trim(),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date of Birth must be in YYYY-MM-DD format')
+    .refine((dob) => {
+      const birthDate = new Date(dob);
+      const now = new Date();
+      return !isNaN(birthDate.getTime()) && birthDate <= now && birthDate >= new Date('1900-01-01');
+    }, 'Date of Birth must be a valid date between 1900 and today')
+    .optional()
+    .nullable(),
+  age: z
+    .number()
+    .min(0, 'Age cannot be negative')
+    .max(130, 'Age cannot exceed 130')
+    .optional()
+    .nullable(),
+  sex: z.enum(['MALE', 'FEMALE', 'OTHER', 'UNKNOWN']).default('UNKNOWN'),
+  contactNumber: z.string().max(64).optional().nullable(),
+  bloodType: z.string().max(16).optional().nullable(),
+  emergencyContact: z.string().max(255).optional().nullable(),
+  symptoms: z.string().max(5000, 'Symptoms text cannot exceed 5000 characters').optional().nullable(),
+  existingConditions: z.string().max(5000, 'Existing conditions text cannot exceed 5000 characters').optional().nullable(),
+  allergies: z.string().max(5000, 'Allergies text cannot exceed 5000 characters').optional().nullable(),
+  medications: z.string().max(5000, 'Medications text cannot exceed 5000 characters').optional().nullable(),
+  medicalHistory: z.string().max(5000, 'Medical history text cannot exceed 5000 characters').optional().nullable(),
+  additionalNotes: z.string().max(5000, 'Additional notes cannot exceed 5000 characters').optional().nullable(),
+});
+
+export type PatientIntakeFormData = z.infer<typeof PatientIntakeFormSchema>;
+
+// Standard Patient Creation / Update Schemas
 export const PatientCreateSchema = z.object({
   identifier: z.string().min(1, 'Patient Identifier / MRN is required'),
   fullName: z.string().min(1, 'Full Name is required'),
@@ -52,6 +110,23 @@ export const PatientCreateSchema = z.object({
 });
 
 export const PatientUpdateSchema = PatientCreateSchema.partial();
+
+// ==========================================
+// DIRECT TEXT INPUT SCHEMA (METHOD B)
+// ==========================================
+export const DirectTextInputSchema = z.object({
+  patientId: z.string().uuid('Valid Patient UUID is required'),
+  rawText: z.string().min(5, 'Clinical text must contain at least 5 characters').max(500000, 'Text exceeds maximum length of 500,000 characters'),
+  originalFileName: z.string().max(255).default('Manual_Clinical_Entry.txt'),
+  documentType: DocumentTypeEnum.default('CLINICIAN_NOTE'),
+  provenanceSource: z.literal('USER_PROVIDED').default('USER_PROVIDED'),
+});
+
+export type DirectTextInputData = z.infer<typeof DirectTextInputSchema>;
+
+// ==========================================
+// CLINICAL ENTITY SCHEMAS
+// ==========================================
 
 // Lab Result Schemas
 export const LabResultSchema = z.object({
